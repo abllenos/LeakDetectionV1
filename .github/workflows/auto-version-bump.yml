@@ -1,0 +1,98 @@
+name: Auto Version Bump
+
+'on':
+  push:
+    branches:
+      - main
+      - master
+    paths-ignore:
+      - '.github/**'
+      - 'README.md'
+      - '.gitignore'
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install -g semver
+
+      - name: Get current version
+        id: current_version
+        run: |
+          CURRENT_VERSION=$(node -p "require('./app.json').expo.version")
+          echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $CURRENT_VERSION"
+
+      - name: Bump version
+        id: bump_version
+        run: |
+          CURRENT_VERSION=${{ steps.current_version.outputs.version }}
+          
+          # Check commit message for version bump type
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          
+          if [[ $COMMIT_MSG == *"[major]"* ]]; then
+            NEW_VERSION=$(npx semver $CURRENT_VERSION -i major)
+          elif [[ $COMMIT_MSG == *"[minor]"* ]]; then
+            NEW_VERSION=$(npx semver $CURRENT_VERSION -i minor)
+          else
+            # Default to patch version bump
+            NEW_VERSION=$(npx semver $CURRENT_VERSION -i patch)
+          fi
+          
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "New version: $NEW_VERSION"
+
+      - name: Get current build numbers
+        id: current_build
+        run: |
+          IOS_BUILD=$(node -p "require('./app.json').expo.ios.buildNumber")
+          ANDROID_BUILD=$(node -p "require('./app.json').expo.android.versionCode")
+          echo "ios_build=$IOS_BUILD" >> $GITHUB_OUTPUT
+          echo "android_build=$ANDROID_BUILD" >> $GITHUB_OUTPUT
+
+      - name: Increment build numbers
+        id: new_build
+        run: |
+          IOS_BUILD=${{ steps.current_build.outputs.ios_build }}
+          ANDROID_BUILD=${{ steps.current_build.outputs.android_build }}
+          
+          NEW_IOS_BUILD=$((IOS_BUILD + 1))
+          NEW_ANDROID_BUILD=$((ANDROID_BUILD + 1))
+          
+          echo "ios_build=$NEW_IOS_BUILD" >> $GITHUB_OUTPUT
+          echo "android_build=$NEW_ANDROID_BUILD" >> $GITHUB_OUTPUT
+
+      - name: Update app.json
+        run: |
+          node -e "
+          const fs = require('fs');
+          const appJson = require('./app.json');
+          
+          appJson.expo.version = '${{ steps.bump_version.outputs.new_version }}';
+          appJson.expo.ios.buildNumber = '${{ steps.new_build.outputs.ios_build }}';
+          appJson.expo.android.versionCode = ${{ steps.new_build.outputs.android_build }};
+          
+          fs.writeFileSync('./app.json', JSON.stringify(appJson, null, 2) + '\n');
+          "
+
+      - name: Commit version bump
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add app.json
+          git commit -m "chore: bump version to ${{ steps.bump_version.outputs.new_version }} [skip ci]"
+          git push
