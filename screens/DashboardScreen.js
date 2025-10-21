@@ -11,38 +11,137 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import AppHeader from '../components/AppHeader';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
-import { Modal, FlatList } from 'react-native';
+import { useEffect, useState, useRef } from 'react';
+import { Modal, FlatList, ActivityIndicator } from 'react-native';
 import { fetchNotifications, markAllRead, clearNotifications } from '../services/notifications';
+import { startPeriodicDataCheck, stopPeriodicDataCheck } from '../services/dataChecker';
+import { fetchLeakReports } from '../services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function DashboardScreen({ navigation }) {
   const [notifModalVisible, setNotifModalVisible] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const dataCheckIntervalRef = useRef(null);
+  
+  // Leak reports state
+  const [leakReportsData, setLeakReportsData] = useState(null);
+  const [loadingReports, setLoadingReports] = useState(true);
+  const [userData, setUserData] = useState({ name: 'User', avatar: 'U' });
 
   const loadNotifs = async () => {
     const list = await fetchNotifications();
     setNotifications(list);
+    setUnreadCount(list.filter((n) => !n.read).length);
+  };
+
+  const handleNotificationClick = async (notification) => {
+    console.log('Notification clicked:', notification);
+    
+    try {
+      // Mark this notification as read
+      const STORAGE_KEY = 'app_notifications';
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      const list = raw ? JSON.parse(raw) : [];
+      
+      const updatedList = list.map(n => 
+        n.id === notification.id ? { ...n, read: true } : n
+      );
+      
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedList));
+      
+      // Update local state
+      setNotifications(updatedList);
+      setUnreadCount(updatedList.filter((n) => !n.read).length);
+      
+      // Handle different notification types
+      if (notification.type === 'data_update') {
+        // Close modal and navigate to Settings screen
+        setNotifModalVisible(false);
+        navigation.navigate('Settings');
+      }
+    } catch (error) {
+      console.error('Failed to handle notification click:', error);
+    }
   };
 
   useEffect(() => {
     loadNotifs();
-    const computeUnread = async () => {
-      const list = await fetchNotifications();
-      setUnreadCount(list.filter((n) => !n.read).length);
-    };
-    computeUnread();
+    
+    // Start periodic data checking (every 1 hour)
+    dataCheckIntervalRef.current = startPeriodicDataCheck();
 
     const unsubscribe = navigation.addListener('focus', () => {
       loadNotifs();
     });
+    
+    return () => {
+      unsubscribe();
+      // Stop periodic checking when component unmounts
+      stopPeriodicDataCheck(dataCheckIntervalRef.current);
+    };
+  }, []);
+
+  // Load user data and leak reports
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        // Load user data
+        const userDataStr = await AsyncStorage.getItem('userData');
+        if (userDataStr) {
+          const user = JSON.parse(userDataStr);
+          console.log('👤 User data loaded:', user); // Debug log
+          
+          // Build full name from API fields: fName, mName, lName
+          const firstName = user.fName || user.firstName || '';
+          const middleName = user.mName || user.middleName || '';
+          const lastName = user.lName || user.lastName || '';
+          
+          // Combine names (with middle initial if available)
+          let userName = firstName;
+          if (middleName) {
+            userName += ' ' + middleName[0] + '.';
+          }
+          if (lastName) {
+            userName += ' ' + lastName;
+          }
+          
+          // Fallback to username or 'User' if no name found
+          if (!userName.trim()) {
+            userName = user.username || user.empId || 'User';
+          }
+          
+          setUserData({
+            name: userName.trim(),
+            avatar: firstName ? firstName[0].toUpperCase() : 'U',
+            empId: user.empId || user.employeeId || user.id || user.userId
+          });
+          
+          console.log('✅ Dashboard user set:', { name: userName, empId: user.empId || user.employeeId || user.id });
+        } else {
+          console.warn('⚠️ No user data found in storage');
+        }
+        
+        // Load leak reports
+        setLoadingReports(true);
+        const reportsData = await fetchLeakReports();
+        setLeakReportsData(reportsData);
+      } catch (error) {
+        console.error('Failed to load dashboard data:', error);
+      } finally {
+        setLoadingReports(false);
+      }
+    };
+    
+    loadData();
+    
+    // Reload when screen comes into focus
+    const unsubscribe = navigation.addListener('focus', () => {
+      loadData();
+    });
+    
     return unsubscribe;
   }, []);
-  // Sample data - replace with real data later
-  const userData = {
-    name: 'ALVIN LLENOS',
-    avatar: 'A',
-  };
 
   const statsData = [
     {
@@ -51,7 +150,7 @@ export default function DashboardScreen({ navigation }) {
       iconFamily: 'MaterialIcons',
       title: 'Total Reports',
       subtitle: 'All leak reports',
-      count: 7,
+      count: leakReportsData?.totalCount || 0,
       color: '#2196F3',
       borderColor: '#2196F3',
     },
@@ -61,7 +160,7 @@ export default function DashboardScreen({ navigation }) {
       iconFamily: 'MaterialIcons',
       title: 'Dispatched',
       subtitle: 'Sent to field',
-      count: 2,
+      count: leakReportsData?.dispatchedCount || 0,
       color: '#4CAF50',
       borderColor: '#4CAF50',
     },
@@ -71,7 +170,7 @@ export default function DashboardScreen({ navigation }) {
       iconFamily: 'Ionicons',
       title: 'Repaired',
       subtitle: 'Completed fixes',
-      count: 0,
+      count: leakReportsData?.repairedCount || 0,
       color: '#9C27B0',
       borderColor: '#9C27B0',
     },
@@ -81,7 +180,7 @@ export default function DashboardScreen({ navigation }) {
       iconFamily: 'Ionicons',
       title: 'After Meter',
       subtitle: 'Post-meter leaks',
-      count: 0,
+      count: leakReportsData?.afterCount || 0,
       color: '#FF9800',
       borderColor: '#FF9800',
     },
@@ -91,23 +190,66 @@ export default function DashboardScreen({ navigation }) {
       iconFamily: 'Ionicons',
       title: 'Not Found',
       subtitle: 'Unlocated leaks',
-      count: 0,
+      count: leakReportsData?.notFoundCount || 0,
       color: '#F44336',
       borderColor: '#F44336',
     },
   ];
 
-  const recentActivity = [
-    {
-      id: 1,
-      title: 'Serviceline [20251014C4]',
-      location: 'DURIAN PALAYROK VIL MATIN',
-      time: '1h ago',
-      iconName: 'water',
+  // Helper function to format time ago
+  const getTimeAgo = (dateString) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  // Helper function to get leak type color
+  const getLeakTypeColor = (dispatchStat) => {
+    switch (dispatchStat) {
+      case 0: return '#2196F3'; // Reported
+      case 1: return '#FF9800'; // Scheduled
+      case 2: return '#4CAF50'; // Dispatched
+      case 3: return '#9C27B0'; // Repaired
+      case 4: return '#F44336'; // Not found
+      default: return '#6b7280';
+    }
+  };
+
+  // Helper function to get leak type icon
+  const getLeakTypeIcon = (dispatchStat) => {
+    switch (dispatchStat) {
+      case 0: return 'alert-circle'; // Reported
+      case 1: return 'time'; // Scheduled
+      case 2: return 'send'; // Dispatched
+      case 3: return 'checkmark-circle'; // Repaired
+      case 4: return 'close-circle'; // Not found
+      default: return 'water';
+    }
+  };
+
+  // Transform API reports to recent activity format (show latest 5)
+  const recentActivity = (leakReportsData?.reports || [])
+    .slice(0, 5)
+    .map((report, index) => ({
+      id: report.id || index,
+      title: `${report.refNo || 'N/A'}`,
+      location: report.reportedLocation || 'Unknown location',
+      time: getTimeAgo(report.dtReported),
+      iconName: getLeakTypeIcon(report.dispatchStat),
       iconFamily: 'Ionicons',
-      iconBg: '#4CAF50',
-    },
-  ];
+      iconBg: getLeakTypeColor(report.dispatchStat),
+      meterNumber: report.referenceMtr,
+      dispatchStatus: report.dispatchStat
+    }));
 
   const renderIcon = (iconFamily, iconName, size, color) => {
     switch (iconFamily) {
@@ -202,16 +344,30 @@ export default function DashboardScreen({ navigation }) {
               data={notifications}
               keyExtractor={(i) => String(i.id)}
               renderItem={({ item }) => (
-                <View style={[styles.notifItem, !item.read && styles.notifItemUnread]}>
+                <TouchableOpacity 
+                  style={[styles.notifItem, !item.read && styles.notifItemUnread]}
+                  onPress={() => handleNotificationClick(item)}
+                  activeOpacity={0.7}
+                >
                   <View style={styles.notifItemHeader}>
                     {!item.read && <View style={styles.notifUnreadDot} />}
                     <Text style={[styles.notifItemTitle, !item.read && styles.notifItemTitleUnread]}>
                       {item.title}
                     </Text>
                   </View>
-                  {item.body ? (
+                  {item.message ? (
+                    <Text style={styles.notifItemBody}>{item.message}</Text>
+                  ) : item.body ? (
                     <Text style={styles.notifItemBody}>{item.body}</Text>
                   ) : null}
+                  {item.data && item.data.difference && (
+                    <View style={styles.notifDataBadge}>
+                      <Ionicons name="cloud-download-outline" size={14} color="#1e5a8e" />
+                      <Text style={styles.notifDataText}>
+                        {item.data.difference.toLocaleString()} new records
+                      </Text>
+                    </View>
+                  )}
                   <View style={styles.notifItemFooter}>
                     <Ionicons name="time-outline" size={12} color="#94a3b8" />
                     <Text style={styles.notifItemTime}>
@@ -223,8 +379,13 @@ export default function DashboardScreen({ navigation }) {
                         hour12: true
                       })}
                     </Text>
+                    {item.type === 'data_update' && (
+                      <View style={styles.notifActionIndicator}>
+                        <Ionicons name="chevron-forward" size={14} color="#64748b" />
+                      </View>
+                    )}
                   </View>
-                </View>
+                </TouchableOpacity>
               )}
               ListEmptyComponent={
                 <View style={styles.notifEmptyState}>
@@ -240,23 +401,39 @@ export default function DashboardScreen({ navigation }) {
       </Modal>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Loading indicator */}
+        {loadingReports && (
+          <View style={{ padding: 20, alignItems: 'center' }}>
+            <ActivityIndicator size="large" color="#1e5a8e" />
+            <Text style={{ color: '#6b7280', marginTop: 8 }}>Loading reports...</Text>
+          </View>
+        )}
+        
         {/* Quick Stats Summary */}
-        <View style={styles.quickStats}>
-          <View style={styles.quickStatItem}>
-            <Text style={styles.quickStatValue}>7</Text>
-            <Text style={styles.quickStatLabel}>Total</Text>
-          </View>
-          <View style={styles.quickStatDivider} />
-          <View style={styles.quickStatItem}>
-            <Text style={[styles.quickStatValue, { color: '#4CAF50' }]}>2</Text>
-            <Text style={styles.quickStatLabel}>Active</Text>
-          </View>
-          <View style={styles.quickStatDivider} />
-          <View style={styles.quickStatItem}>
-            <Text style={[styles.quickStatValue, { color: '#9C27B0' }]}>0</Text>
-            <Text style={styles.quickStatLabel}>Completed</Text>
-          </View>
-        </View>
+        {!loadingReports && (
+          <>
+            <View style={styles.quickStats}>
+              <View style={styles.quickStatItem}>
+                <Text style={styles.quickStatValue}>{leakReportsData?.totalCount || 0}</Text>
+                <Text style={styles.quickStatLabel}>Total</Text>
+              </View>
+              <View style={styles.quickStatDivider} />
+              <View style={styles.quickStatItem}>
+                <Text style={[styles.quickStatValue, { color: '#4CAF50' }]}>
+                  {leakReportsData?.dispatchedCount || 0}
+                </Text>
+                <Text style={styles.quickStatLabel}>Dispatched</Text>
+              </View>
+              <View style={styles.quickStatDivider} />
+              <View style={styles.quickStatItem}>
+                <Text style={[styles.quickStatValue, { color: '#9C27B0' }]}>
+                  {leakReportsData?.repairedCount || 0}
+                </Text>
+                <Text style={styles.quickStatLabel}>Repaired</Text>
+              </View>
+            </View>
+          </>
+        )}
 
         {/* Overview Section */}
         <Text style={styles.sectionTitle}>Leak Reports Overview</Text>
@@ -286,29 +463,49 @@ export default function DashboardScreen({ navigation }) {
         {/* Recent Activity Section */}
         <View style={styles.activityHeader}>
           <Text style={styles.sectionTitle}>Recent Activity</Text>
-          <TouchableOpacity>
+          <TouchableOpacity onPress={async () => {
+            setLoadingReports(true);
+            const reportsData = await fetchLeakReports();
+            setLeakReportsData(reportsData);
+            setLoadingReports(false);
+          }}>
             <Text style={styles.refreshButton}>Refresh</Text>
           </TouchableOpacity>
         </View>
 
         {/* Activity List */}
         <View style={styles.activityContainer}>
-          {recentActivity.map((activity) => (
-            <TouchableOpacity 
-              key={activity.id} 
-              style={styles.activityCard}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.activityIconContainer, { backgroundColor: activity.iconBg + '20' }]}>
-                {renderIcon(activity.iconFamily, activity.iconName, 20, activity.iconBg)}
-              </View>
-              <View style={styles.activityInfo}>
-                <Text style={styles.activityTitle}>{activity.title}</Text>
-                <Text style={styles.activityLocation}>{activity.location}</Text>
-              </View>
-              <Text style={styles.activityTime}>{activity.time}</Text>
-            </TouchableOpacity>
-          ))}
+          {loadingReports ? (
+            <View style={{ padding: 20, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color="#1e5a8e" />
+            </View>
+          ) : recentActivity.length > 0 ? (
+            recentActivity.map((activity) => (
+              <TouchableOpacity 
+                key={activity.id} 
+                style={styles.activityCard}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.activityIconContainer, { backgroundColor: activity.iconBg + '20' }]}>
+                  {renderIcon(activity.iconFamily, activity.iconName, 20, activity.iconBg)}
+                </View>
+                <View style={styles.activityInfo}>
+                  <Text style={styles.activityTitle}>{activity.title}</Text>
+                  <Text style={styles.activityLocation}>{activity.location}</Text>
+                  {activity.meterNumber && (
+                    <Text style={styles.activityMeter}>Meter: {activity.meterNumber}</Text>
+                  )}
+                </View>
+                <Text style={styles.activityTime}>{activity.time}</Text>
+              </TouchableOpacity>
+            ))
+          ) : (
+            <View style={styles.emptyState}>
+              <Ionicons name="clipboard-outline" size={48} color="#cbd5e1" />
+              <Text style={styles.emptyStateTitle}>No Recent Activity</Text>
+              <Text style={styles.emptyStateText}>Your leak reports will appear here</Text>
+            </View>
+          )}
         </View>
       </ScrollView>
 
@@ -527,10 +724,32 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontWeight: '500',
   },
+  activityMeter: {
+    fontSize: 11,
+    color: '#94a3b8',
+    marginTop: 2,
+    fontWeight: '500',
+  },
   activityTime: {
     fontSize: 12,
     color: '#9aa5b1',
     fontWeight: '600',
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  emptyStateTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#334155',
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  emptyStateText: {
+    fontSize: 14,
+    color: '#94a3b8',
   },
   
   // Notification Modal Styles
@@ -657,6 +876,22 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 8,
   },
+  notifDataBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#e6f0fb',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+  },
+  notifDataText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1e5a8e',
+    marginLeft: 4,
+  },
   notifItemFooter: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -665,6 +900,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#94a3b8',
     marginLeft: 4,
+    flex: 1,
+  },
+  notifActionIndicator: {
+    marginLeft: 'auto',
+    backgroundColor: '#f1f5f9',
+    borderRadius: 12,
+    padding: 4,
   },
   notifEmptyState: {
     flex: 1,

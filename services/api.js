@@ -1,38 +1,93 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { devApi, API_BASE } from './interceptor';
 
+// Helpers to handle storage-full scenarios caused by large cached datasets
+const STORAGE_AUTH_KEYS = new Set(['token', 'refresh_token', 'userData', 'savedUsername', 'savedPassword', 'rememberMe']);
+
+const isStorageFullError = (err) => {
+  const msg = (err?.message || err?.toString() || '').toString();
+  return /SQLITE_FULL|database or disk is full|ENOSPC|no such file or directory/i.test(msg);
+};
+
+const clearHeavyStorage = async () => {
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    // Remove large cache keys while preserving auth-related keys
+    const keysToRemove = keys.filter((k) => {
+      if (STORAGE_AUTH_KEYS.has(k)) return false;
+      // Target our large offline caches and progress markers
+      return (
+        k.startsWith('allCustomers_') ||
+        k === 'dmaCodes'
+      );
+    });
+    if (keysToRemove.length) {
+      await AsyncStorage.multiRemove(keysToRemove);
+      console.log(`🧹 Cleared heavy storage keys: ${keysToRemove.length}`);
+    }
+  } catch (e) {
+    console.warn('Failed during heavy storage cleanup:', e?.message || e);
+  }
+};
+
+const safeSetItem = async (key, value) => {
+  try {
+    await AsyncStorage.setItem(key, value);
+  } catch (e) {
+    if (isStorageFullError(e)) {
+      console.warn('Storage full detected while writing', key, '- attempting cleanup and retry');
+      await clearHeavyStorage();
+      // Retry once after cleanup
+      await AsyncStorage.setItem(key, value);
+      return;
+    }
+    throw e;
+  }
+};
+
 // (pause/resume feature removed per user request)
 
 // Login helper
 export const login = async (username, password) => {
   try {
-    console.log('🔑 Attempting login for user:', username);
+    // Defensive trim (LoginScreen also trims, but ensure here too)
+    const u = (username ?? '').toString().trim();
+    const p = (password ?? '').toString().trim();
+    console.log('🔑 Attempting login for user:', u);
     
     // Clear any existing tokens before login to prevent conflicts
     await AsyncStorage.removeItem('token');
     await AsyncStorage.removeItem('refresh_token');
     
     const { data } = await devApi.post('/admin/userlogin/login', {
-      username,
-      password,
+      username: u,
+      password: p,
     });
     
     console.log('📥 Login response received:', JSON.stringify(data, null, 2));
     
     if (data?.statusCode === 200 && data?.data?.token) {
       const { token, refreshToken } = data.data;
-      await AsyncStorage.setItem('token', token);
+      // Use safe setters that auto-clean when storage is full
+      await safeSetItem('token', token);
       if (refreshToken) {
-        await AsyncStorage.setItem('refresh_token', refreshToken);
+        await safeSetItem('refresh_token', refreshToken);
       }
-      await AsyncStorage.setItem('userData', JSON.stringify(data.data));
-      console.log('✅ Login successful');
+      await safeSetItem('userData', JSON.stringify(data.data));
+      
+      console.log('✅ Login successful - User:', data.data.fName, data.data.lName);
       return data.data;
     }
     
     console.warn('⚠️ Login failed - invalid response format:', data);
     throw new Error(data?.message || 'Login failed');
   } catch (error) {
+    // If storage is full, surface a clearer message
+    if (isStorageFullError(error)) {
+      const friendly = new Error('Storage is full. Please clear cached data in Settings > Clear All Storage Data, then try again.');
+      console.error('❌ Login error: storage full');
+      throw friendly;
+    }
     console.error('❌ Login error:', error?.response?.status, error?.response?.data || error.message);
     if (error?.response) {
       console.error('Full error response:', JSON.stringify(error.response, null, 2));
@@ -77,8 +132,8 @@ export const fetchDmaCodes = async (forceRefresh = false) => {
     const items = res?.data?.data?.data || [];
     const codes = items.map((it) => it.dmaCode).filter(Boolean);
 
-    // Cache the result for future calls
-    await AsyncStorage.setItem('dmaCodes', JSON.stringify(codes));
+  // Cache the result for future calls (use safe setter to tolerate low space)
+  await safeSetItem('dmaCodes', JSON.stringify(codes));
 
     return codes;
   } catch (error) {
@@ -201,8 +256,8 @@ export const hasRemoteDataChanged = async () => {
     });
 
     const firstPageData = res?.data?.data || res?.data || {};
-    const remoteCount = firstPageData.count || firstPageData.totalRecords || firstPageData.total || 0;
-    const localCount = parseInt(cachedCount);
+    const remoteCount = firstPageData.count || firstPageData.totalRecords || firstPageData.total || firstPageData.totalCount || 0;
+    const localCount = parseInt(cachedCount) || 0;
 
     console.log(`📊 Data comparison: Local=${localCount}, Remote=${remoteCount}`);
 
@@ -216,6 +271,46 @@ export const hasRemoteDataChanged = async () => {
   } catch (error) {
     console.error('Failed to check remote data:', error?.message || error);
     return false; // On error, assume cache is fine
+  }
+};
+
+/**
+ * Check for new data and return details about the change
+ * Returns { hasNewData: boolean, localCount: number, remoteCount: number, difference: number }
+ */
+export const checkForNewData = async () => {
+  try {
+    const cachedCount = await AsyncStorage.getItem('allCustomers_count');
+    const localCount = parseInt(cachedCount) || 0;
+
+    // Fetch first page to get remote total count
+    const res = await devApi.get('/admin/customer/paginate', {
+      params: { page: 1, pageSize: 50 }
+    });
+
+    const firstPageData = res?.data?.data || res?.data || {};
+    const remoteCount = firstPageData.count || firstPageData.totalRecords || firstPageData.total || firstPageData.totalCount || 0;
+    const difference = remoteCount - localCount;
+
+    console.log(`📊 Data check: Local=${localCount}, Remote=${remoteCount}, Difference=${difference}`);
+
+    return {
+      hasNewData: difference > 0,
+      localCount,
+      remoteCount,
+      difference,
+      needsDownload: remoteCount !== localCount
+    };
+  } catch (error) {
+    console.error('Failed to check for new data:', error?.message || error);
+    return {
+      hasNewData: false,
+      localCount: 0,
+      remoteCount: 0,
+      difference: 0,
+      needsDownload: false,
+      error: error?.message || 'Unknown error'
+    };
   }
 };
 
@@ -375,7 +470,17 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
   try {
     const existingFirst = await AsyncStorage.getItem(perPageKey(1));
     if (!existingFirst) {
-      await AsyncStorage.setItem(perPageKey(1), JSON.stringify(firstPageCustomers));
+      try {
+        await AsyncStorage.setItem(perPageKey(1), JSON.stringify(firstPageCustomers));
+      } catch (e) {
+        if (isStorageFullError(e)) {
+          console.warn('Storage full while writing page 1');
+          const err = new Error('Storage is full. Please clear storage in Settings > Clear All Storage Data, then try again.');
+          err.code = 'STORAGE_FULL';
+          throw err;
+        }
+        throw e;
+      }
       pagesCount = 1;
       recordsStored = Array.isArray(firstPageCustomers) ? firstPageCustomers.length : 0;
     } else {
@@ -387,6 +492,9 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
     }
   } catch (e) {
     console.warn('Failed to access/write page 1 storage:', e?.message || e);
+    if (e?.code === 'STORAGE_FULL' || isStorageFullError(e)) {
+      throw e; // bubble up with friendly message
+    }
     // still treat page 1 as fetched in memory
     pagesCount = 1;
     recordsStored = Array.isArray(firstPageCustomers) ? firstPageCustomers.length : 0;
@@ -398,6 +506,9 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
       const percent = isPaginated ? Math.round((currentPage / totalPages) * 100) : 50;
       onProgress(percent);
     }
+    
+    // Track fetched count across both paginated and non-paginated flows
+    let fetchedCount = pagesCount; // may be >1 if some pages present
     
     // Fetch remaining pages in parallel batches (only if paginated)
     if (isPaginated && totalPages > 1) {
@@ -454,8 +565,6 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
           pagesToFetch.push(p);
         }
       }
-
-      let fetchedCount = pagesCount; // may be >1 if some pages present
 
       // Create a manifest so downloads can be resumed and UI can read progress
       const manifestKey = 'allCustomers_manifest';
@@ -568,6 +677,12 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
           try {
             await AsyncStorage.setItem(perPageKey(r.page), JSON.stringify(pageCustomers));
           } catch (e) {
+            if (isStorageFullError(e)) {
+              console.warn(`Storage full while writing page ${r.page}`);
+              const err = new Error('Storage is full. Please clear storage in Settings > Clear All Storage Data, then try again.');
+              err.code = 'STORAGE_FULL';
+              throw err;
+            }
             console.warn(`Failed to write page ${r.page} to storage:`, e?.message || e);
           }
 
@@ -626,7 +741,17 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
           currentChunk.push(rec);
           if (currentChunk.length >= STORAGE_CHUNK_SIZE) {
             // flush chunk
-            await AsyncStorage.setItem(`allCustomers_chunk_${storageChunksCount}`, JSON.stringify(currentChunk));
+            try {
+              await AsyncStorage.setItem(`allCustomers_chunk_${storageChunksCount}`, JSON.stringify(currentChunk));
+            } catch (e) {
+              if (isStorageFullError(e)) {
+                console.warn(`Storage full while writing chunk ${storageChunksCount}`);
+                const err = new Error('Storage is full. Please clear storage in Settings > Clear All Storage Data, then try again.');
+                err.code = 'STORAGE_FULL';
+                throw err;
+              }
+              throw e;
+            }
             storageChunksCount++;
             totalProcessed += currentChunk.length;
             currentChunk = [];
@@ -643,16 +768,32 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
 
     // flush remaining
     if (currentChunk.length > 0) {
-      await AsyncStorage.setItem(`allCustomers_chunk_${storageChunksCount}`, JSON.stringify(currentChunk));
+      try {
+        await AsyncStorage.setItem(`allCustomers_chunk_${storageChunksCount}`, JSON.stringify(currentChunk));
+      } catch (e) {
+        if (isStorageFullError(e)) {
+          console.warn(`Storage full while writing final chunk ${storageChunksCount}`);
+          const err = new Error('Storage is full. Please clear storage in Settings > Clear All Storage Data, then try again.');
+          err.code = 'STORAGE_FULL';
+          throw err;
+        }
+        throw e;
+      }
       totalProcessed += currentChunk.length;
       storageChunksCount++;
       if (onProgress) onProgress(Math.round((totalProcessed / totalRecords) * 100), totalProcessed, totalRecords);
     }
 
     // Store metadata
-    await AsyncStorage.setItem('allCustomers_count', String(totalProcessed));
-    await AsyncStorage.setItem('allCustomers_chunks', String(storageChunksCount));
-    await AsyncStorage.setItem('allCustomers_timestamp', Date.now().toString());
+    try { await AsyncStorage.setItem('allCustomers_count', String(totalProcessed)); } catch (e) {
+      if (isStorageFullError(e)) { const err = new Error('Storage is full when writing metadata.'); err.code = 'STORAGE_FULL'; throw err; } else { throw e; }
+    }
+    try { await AsyncStorage.setItem('allCustomers_chunks', String(storageChunksCount)); } catch (e) {
+      if (isStorageFullError(e)) { const err = new Error('Storage is full when writing metadata.'); err.code = 'STORAGE_FULL'; throw err; } else { throw e; }
+    }
+    try { await AsyncStorage.setItem('allCustomers_timestamp', Date.now().toString()); } catch (e) {
+      if (isStorageFullError(e)) { const err = new Error('Storage is full when writing metadata.'); err.code = 'STORAGE_FULL'; throw err; } else { throw e; }
+    }
 
     console.log(`✓ Cached ${totalProcessed} customers in ${storageChunksCount} chunks`);
 
@@ -683,6 +824,17 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
     if (onProgress) onProgress(100, totalProcessed, totalProcessed);
     return allCustomersArr;
   } catch (err) {
+    if (err?.code === 'STORAGE_FULL' || isStorageFullError(err)) {
+      console.error('fetchAllCustomers aborted: storage full');
+      // Write a status flag best-effort
+      try {
+        const statusKey = 'allCustomers_download_status';
+        const payload = { status: 'error', reason: 'storage-full' };
+        await AsyncStorage.setItem(statusKey, JSON.stringify(payload));
+      } catch (_) {}
+      // Surface friendly error
+      throw new Error('Storage is full. Please clear storage in Settings > Clear All Storage Data, then try again.');
+    }
     console.error('fetchAllCustomers error', err?.response?.data || err.message || err);
     
     // If network fails, try to use cached data even if expired
@@ -753,6 +905,97 @@ export const fetchNearestMeters = async (lat, lng, count = 3) => {
       return [];
     }
     console.error('fetchNearestMeters error', err?.response?.data || err.message || err);
+    throw err;
+  }
+};
+
+/**
+ * Fetch leak reports for the current user
+ * Returns reports with statistics (reported, dispatched, repaired, etc.)
+ */
+export const fetchLeakReports = async (empId) => {
+  try {
+    // Get empId from stored user data if not provided
+    let employeeId = empId;
+    if (!employeeId) {
+      const userData = await AsyncStorage.getItem('userData');
+      if (userData) {
+        const user = JSON.parse(userData);
+        employeeId = user.empId || user.employeeId || user.id;
+      }
+    }
+
+    if (!employeeId) {
+      console.warn('⚠️ No employee ID found for fetching leak reports');
+      // Return empty structure instead of throwing
+      return {
+        reports: [],
+        reportedCount: 0,
+        dispatchedCount: 0,
+        repairedCount: 0,
+        scheduledCount: 0,
+        turnoverCount: 0,
+        afterCount: 0,
+        notFoundCount: 0,
+        totalCount: 0
+      };
+    }
+
+    console.log('📋 Fetching leak reports for employee:', employeeId);
+    
+    const res = await devApi.get(`/admin/GetLeakReports/mobile/user/${employeeId}`);
+    
+    const responseData = res?.data?.data || res?.data || {};
+    
+    console.log('✅ Leak reports fetched:', {
+      totalCount: responseData.totalCount || 0,
+      reportedCount: responseData.reportedCount || 0,
+      dispatchedCount: responseData.dispatchedCount || 0,
+      repairedCount: responseData.repairedCount || 0
+    });
+    
+    return {
+      reports: responseData.reports || [],
+      reportedCount: responseData.reportedCount || 0,
+      dispatchedCount: responseData.dispatchedCount || 0,
+      repairedCount: responseData.repairedCount || 0,
+      scheduledCount: responseData.scheduledCount || 0,
+      turnoverCount: responseData.turnoverCount || 0,
+      afterCount: responseData.afterCount || 0,
+      notFoundCount: responseData.notFoundCount || 0,
+      totalCount: responseData.totalCount || 0
+    };
+  } catch (err) {
+    console.error('fetchLeakReports error', err?.response?.data || err.message || err);
+    // Return empty structure on error instead of throwing
+    return {
+      reports: [],
+      reportedCount: 0,
+      dispatchedCount: 0,
+      repairedCount: 0,
+      scheduledCount: 0,
+      turnoverCount: 0,
+      afterCount: 0,
+      notFoundCount: 0,
+      totalCount: 0
+    };
+  }
+};
+
+/**
+ * Submit a new leak report
+ */
+export const submitLeakReport = async (reportData) => {
+  try {
+    console.log('📤 Submitting leak report:', reportData);
+    
+    const res = await devApi.post('/admin/leak-report', reportData);
+    
+    console.log('✅ Leak report submitted successfully');
+    
+    return res?.data;
+  } catch (err) {
+    console.error('submitLeakReport error', err?.response?.data || err.message || err);
     throw err;
   }
 };

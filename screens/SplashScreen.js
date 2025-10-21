@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, Image, StyleSheet, Dimensions, TouchableOpacity, Animated } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
+import Constants from 'expo-constants';
 
 const { width, height } = Dimensions.get('window');
 const AnimatedPath = Animated.createAnimatedComponent(Path);
@@ -110,7 +111,10 @@ export default function SplashScreen({ navigation }) {
       {/* Footer Text */}
       <View style={styles.footer}>
         <Text style={styles.footerText}>© DAVAO CITY WATER DISTRICT 2021</Text>
-        <Text style={styles.versionText}>ver. 2.5.10</Text>
+        <Text style={styles.versionText}>
+          ver. {Constants.expoConfig?.version || '2.0.0'}
+          {(Constants.expoConfig?.android?.versionCode || Constants.expoConfig?.ios?.buildNumber) ? ` (b.${Constants.expoConfig?.android?.versionCode || Constants.expoConfig?.ios?.buildNumber})` : ''}
+        </Text>
       </View>
     </TouchableOpacity>
   );

@@ -17,6 +17,7 @@ import Constants from 'expo-constants';
 import { API_BASE } from '../services/interceptor';
 import { logout, preCacheCustomers, getAvailableCustomers } from '../services/api';
 import { stopLocationTracking } from '../services/locationTracker';
+import { forceCheckNewData } from '../services/dataChecker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function SettingsScreen({ navigation }) {
@@ -40,8 +41,10 @@ export default function SettingsScreen({ navigation }) {
   const [clientModalVisible, setClientModalVisible] = useState(false);
   const [clientProgress, setClientProgress] = useState(0);
   const [clientSuccess, setClientSuccess] = useState(false);
+  const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false); // Track if updating existing data
   
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
 
   // Check if customer data is cached on mount and poll during download
   React.useEffect(() => {
@@ -69,7 +72,22 @@ export default function SettingsScreen({ navigation }) {
 
   const checkCachedData = async () => {
     try {
-      // First check if download is in progress (fast count)
+      // Check completed download FIRST (existing data)
+      const chunkCount = await AsyncStorage.getItem('allCustomers_chunks');
+      const cachedCount = await AsyncStorage.getItem('allCustomers_count');
+      
+      if (chunkCount && cachedCount) {
+        const count = parseInt(cachedCount);
+        console.log(`📦 Download complete: ${count} customers available`);
+        setClientDataAvailable(true);
+        setClientRecordCount(count);
+        
+        // If there's also a download in progress, we'll show the cached count
+        // The download will update this when it completes
+        return;
+      }
+      
+      // If no completed download, check if download is in progress (fast count)
       const downloadCount = await AsyncStorage.getItem('allCustomers_download_count');
       if (downloadCount) {
         const count = parseInt(downloadCount);
@@ -97,18 +115,6 @@ export default function SettingsScreen({ navigation }) {
         }
       }
       
-      // Check completed download
-      const chunkCount = await AsyncStorage.getItem('allCustomers_chunks');
-      const cachedCount = await AsyncStorage.getItem('allCustomers_count');
-      
-      if (chunkCount && cachedCount) {
-        const count = parseInt(cachedCount);
-        console.log(`📦 Download complete: ${count} customers available`);
-        setClientDataAvailable(true);
-        setClientRecordCount(count);
-        return;
-      }
-      
       console.log('⚠️ No customer data found');
       setClientDataAvailable(false);
       setClientRecordCount(0);
@@ -116,6 +122,44 @@ export default function SettingsScreen({ navigation }) {
       console.error('Failed to check cache:', error);
       setClientDataAvailable(false);
       setClientRecordCount(0);
+    }
+  };
+
+  const checkForDataUpdates = async () => {
+    setCheckingUpdates(true);
+    try {
+      console.log('🔍 Manually checking for data updates...');
+      const result = await forceCheckNewData();
+      
+      if (result) {
+        // Notification was created
+        Alert.alert(
+          result.title,
+          result.message,
+          [
+            { text: 'Later', style: 'cancel' },
+            { 
+              text: 'Download Now', 
+              onPress: () => downloadClientData()
+            }
+          ]
+        );
+      } else {
+        Alert.alert(
+          'No Updates',
+          'Your customer data is up to date!',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('Failed to check for updates:', error);
+      Alert.alert(
+        'Check Failed',
+        'Failed to check for updates. Please try again.',
+        [{ text: 'OK' }]
+      );
+    } finally {
+      setCheckingUpdates(false);
     }
   };
 
@@ -202,7 +246,68 @@ export default function SettingsScreen({ navigation }) {
     if (!clientDeleting) setClientDeleteModalVisible(false);
   };
 
+  const clearAllStorageData = () => {
+    Alert.alert(
+      'Clear All Data',
+      'This will remove ALL cached data including offline customer data, download progress, and settings. Your login credentials will be preserved. This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Clear All', 
+          style: 'destructive',
+          onPress: confirmClearAllStorage
+        }
+      ]
+    );
+  };
+
+  const confirmClearAllStorage = async () => {
+    try {
+      console.log('🗑️ Clearing all AsyncStorage data...');
+      
+      // Get all keys
+      const allKeys = await AsyncStorage.getAllKeys();
+      console.log(`📦 Found ${allKeys.length} storage keys`);
+      
+      // Filter keys to preserve login credentials
+      const keysToPreserve = ['savedUsername', 'savedPassword', 'rememberMe', 'authToken', 'refreshToken', 'userData'];
+      const keysToRemove = allKeys.filter(key => !keysToPreserve.includes(key));
+      
+      console.log(`🔒 Preserving ${keysToPreserve.length} authentication keys`);
+      console.log(`🗑️ Removing ${keysToRemove.length} data keys`);
+      
+      // Remove all non-auth keys
+      await AsyncStorage.multiRemove(keysToRemove);
+      
+      console.log('✅ Storage cleared successfully');
+      
+      // Reset all UI states
+      setClientDataAvailable(false);
+      setClientRecordCount(0);
+      setClientLoading(false);
+      setClientProgress(0);
+      setCachedTiles(0);
+      setStorageUsed(0);
+      
+      Alert.alert(
+        'Success', 
+        `Cleared ${keysToRemove.length} storage items. Your login credentials are preserved.`,
+        [{ text: 'OK', onPress: () => checkCachedData() }]
+      );
+    } catch (error) {
+      console.error('❌ Failed to clear storage:', error);
+      Alert.alert('Error', 'Failed to clear storage data: ' + error.message);
+    }
+  };
+
   const downloadClientData = () => {
+    // Check if there's existing data to determine if this is an update
+    const checkExisting = async () => {
+      const cachedCount = await AsyncStorage.getItem('allCustomers_count');
+      setIsDownloadingUpdate(!!cachedCount && parseInt(cachedCount) > 0);
+    };
+    checkExisting();
+    
     // show modal to confirm and display progress
     setClientModalVisible(true);
     setClientProgress(0);
@@ -243,6 +348,7 @@ export default function SettingsScreen({ navigation }) {
         setClientLoading(false);
         setClientSuccess(true);
         setClientProgress(100);
+        setIsDownloadingUpdate(false); // Reset update flag
         console.log('✓ Customer data downloaded successfully (background)');
         
         // Refresh cached data count
@@ -363,9 +469,13 @@ export default function SettingsScreen({ navigation }) {
             <View>
               <Text style={styles.smallLabel}>Status:</Text>
               <Text style={styles.valueText}>
-                {clientDataAvailable 
-                  ? `Available (${clientRecordCount.toLocaleString()} customers)` 
-                  : 'Not available'}
+                {clientLoading && isDownloadingUpdate
+                  ? `Updating... (${clientRecordCount.toLocaleString()} → downloading new data)`
+                  : clientDataAvailable 
+                    ? `Available (${clientRecordCount.toLocaleString()} customers)` 
+                    : clientLoading
+                      ? `Downloading... (${clientRecordCount.toLocaleString()} customers)`
+                      : 'Not available'}
               </Text>
             </View>
           </View>
@@ -375,8 +485,41 @@ export default function SettingsScreen({ navigation }) {
               {clientLoading && !clientDataAvailable ? <ActivityIndicator /> : <Text style={styles.outlineBtnText}>Delete Offline Client Data</Text>}
             </TouchableOpacity>
 
+            <TouchableOpacity 
+              style={[styles.outlineBtnFull, { borderColor: '#ef4444', marginTop: 8 }]} 
+              onPress={clearAllStorageData}
+            >
+              <Text style={[styles.outlineBtnText, { color: '#ef4444' }]}>Clear All Storage Data</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity style={styles.primaryBtnFull} onPress={downloadClientData} disabled={clientLoading}>
-              {clientLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Download Client Data</Text>}
+              {clientLoading ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <ActivityIndicator color="#fff" />
+                  <Text style={styles.primaryBtnText}>
+                    {isDownloadingUpdate ? 'Updating...' : 'Downloading...'}
+                  </Text>
+                </View>
+              ) : (
+                <Text style={styles.primaryBtnText}>Download Client Data</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.secondaryBtnFull, { marginTop: 8 }]} 
+              onPress={checkForDataUpdates} 
+              disabled={checkingUpdates || clientLoading || !clientDataAvailable}
+            >
+              {checkingUpdates ? (
+                <ActivityIndicator color="#2196F3" />
+              ) : (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="sync" size={18} color={!clientDataAvailable ? "#94a3b8" : "#2196F3"} />
+                  <Text style={[styles.secondaryBtnText, !clientDataAvailable && { color: '#94a3b8' }]}>
+                    Check for Data Updates
+                  </Text>
+                </View>
+              )}
             </TouchableOpacity>
 
             {/* Download preset selector */}
@@ -698,6 +841,20 @@ const styles = StyleSheet.create({
   primaryBtn: { backgroundColor: '#1e5a8e', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10, alignItems: 'center', justifyContent: 'center', flex: 1, marginRight: 8 },
   primaryBtnFull: { backgroundColor: '#1e5a8e', paddingVertical: 14, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
   primaryBtnText: { color: '#fff', fontWeight: '700' },
+  secondaryBtnFull: {
+    paddingVertical: 14,
+    borderRadius: 10,
+    backgroundColor: '#e3f2fd',
+    borderWidth: 1,
+    borderColor: '#2196F3',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryBtnText: {
+    color: '#2196F3',
+    fontWeight: '600',
+    fontSize: 15,
+  },
 
   outlineBtn: { borderWidth: 1.5, borderColor: '#f43f5e', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   outlineBtnFull: { borderWidth: 1.5, borderColor: '#f43f5e', paddingVertical: 14, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginTop: 6 },

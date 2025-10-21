@@ -152,6 +152,13 @@ class GroupView extends RenderableView {
 
       } else if (child instanceof SvgView) {
         SvgView svgView = (SvgView) child;
+        // Merge properties with inner Svg element.
+        if (svgView.getChildCount() > 0) {
+          View viewNode = svgView.getChildAt(0);
+          if (viewNode instanceof GroupView) {
+            ((GroupView) viewNode).mergeProperties(self);
+          }
+        }
         svgView.drawChildren(canvas);
         if (svgView.isResponsible()) {
           svg.enableTouchEvents();
@@ -165,7 +172,9 @@ class GroupView extends RenderableView {
       int saveCount = canvas.save();
       canvas.setMatrix(null);
       mLayerPaint.setAlpha((int) (mOpacity * 255));
-      canvas.drawBitmap(mLayerBitmap, 0, 0, mLayerPaint);
+      if (mLayerBitmap != null) {
+        canvas.drawBitmap(mLayerBitmap, 0, 0, mLayerPaint);
+      }
       canvas.restoreToCount(saveCount);
     }
     this.setClientRect(groupRect);

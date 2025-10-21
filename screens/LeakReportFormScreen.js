@@ -48,22 +48,58 @@ export default function LeakReportFormScreen({ route, navigation }) {
       return;
     }
     
-    // Request permissions
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission required', 'Camera roll permissions are needed to upload photos.');
-      return;
-    }
-    
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      quality: 0.8,
-      aspect: [4, 3],
-    });
-    if (!result.canceled && result.assets[0]) {
-      setLeakPhotos([...leakPhotos, result.assets[0].uri]);
-    }
+    // Show options to choose camera or gallery
+    Alert.alert(
+      'Add Photo',
+      'Choose an option',
+      [
+        {
+          text: 'Take Photo',
+          onPress: async () => {
+            // Request camera permissions
+            const { status } = await ImagePicker.requestCameraPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permission required', 'Camera permissions are needed to take photos.');
+              return;
+            }
+            
+            const result = await ImagePicker.launchCameraAsync({
+              allowsEditing: true,
+              quality: 0.8,
+              aspect: [4, 3],
+            });
+            if (!result.canceled && result.assets[0]) {
+              setLeakPhotos([...leakPhotos, result.assets[0].uri]);
+            }
+          }
+        },
+        {
+          text: 'Choose from Gallery',
+          onPress: async () => {
+            // Request gallery permissions
+            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permission required', 'Gallery permissions are needed to choose photos.');
+              return;
+            }
+            
+            const result = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              allowsEditing: true,
+              quality: 0.8,
+              aspect: [4, 3],
+            });
+            if (!result.canceled && result.assets[0]) {
+              setLeakPhotos([...leakPhotos, result.assets[0].uri]);
+            }
+          }
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        }
+      ]
+    );
   };
 
   const removeLeakPhoto = (index) => {
@@ -72,22 +108,58 @@ export default function LeakReportFormScreen({ route, navigation }) {
   };
 
   const pickLandmarkPhoto = async () => {
-    // Request permissions
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission required', 'Camera roll permissions are needed to upload photos.');
-      return;
-    }
-    
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      quality: 0.8,
-      aspect: [4, 3],
-    });
-    if (!result.canceled && result.assets[0]) {
-      setLandmarkPhoto(result.assets[0].uri);
-    }
+    // Show options to choose camera or gallery
+    Alert.alert(
+      'Add Landmark Photo',
+      'Choose an option',
+      [
+        {
+          text: 'Take Photo',
+          onPress: async () => {
+            // Request camera permissions
+            const { status } = await ImagePicker.requestCameraPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permission required', 'Camera permissions are needed to take photos.');
+              return;
+            }
+            
+            const result = await ImagePicker.launchCameraAsync({
+              allowsEditing: true,
+              quality: 0.8,
+              aspect: [4, 3],
+            });
+            if (!result.canceled && result.assets[0]) {
+              setLandmarkPhoto(result.assets[0].uri);
+            }
+          }
+        },
+        {
+          text: 'Choose from Gallery',
+          onPress: async () => {
+            // Request gallery permissions
+            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permission required', 'Gallery permissions are needed to choose photos.');
+              return;
+            }
+            
+            const result = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              allowsEditing: true,
+              quality: 0.8,
+              aspect: [4, 3],
+            });
+            if (!result.canceled && result.assets[0]) {
+              setLandmarkPhoto(result.assets[0].uri);
+            }
+          }
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        }
+      ]
+    );
   };
 
   const removeLandmarkPhoto = () => {
