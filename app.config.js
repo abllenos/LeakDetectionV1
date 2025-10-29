@@ -2,17 +2,17 @@ export default {
   expo: {
     name: "LeakDetection",
     slug: "leakdetection",
-    version: "2.0.0",
+    version: "1.0.2",
     platforms: ["ios", "android", "web"],
     orientation: "portrait",
-    icon: "./assets/DCWD LOGO.png",
+  icon: "./assets/leak.png",
     updates: {
       enabled: false,
     },
     assetBundlePatterns: ["**/*"],
     ios: {
       supportsTablet: true,
-      buildNumber: "3",
+      buildNumber: "5",
       infoPlist: {
         NSLocationWhenInUseUsageDescription:
           "This app needs your location to detect leaks and show nearby meters.",
@@ -26,6 +26,7 @@ export default {
     },
     android: {
       package: "com.leakdetection.app",
+      versionCode: 5,
       permissions: [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
@@ -34,7 +35,7 @@ export default {
         "WRITE_EXTERNAL_STORAGE",
       ],
       adaptiveIcon: {
-        foregroundImage: "./assets/DCWD LOGO.png",
+        foregroundImage: "./assets/leak.png",
         backgroundColor: "#1e5a8e",
       },
       config: {

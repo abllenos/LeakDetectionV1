@@ -14,8 +14,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { pushNotification } from '../services/notifications';
-import { fetchDmaCodes } from '../services/api';
+import { fetchDmaCodes, submitLeakReport } from '../services/interceptor';
 
 export default function LeakReportFormScreen({ route, navigation }) {
   const { meterData, coordinates, fromNearest } = route.params || {};
@@ -166,7 +167,7 @@ export default function LeakReportFormScreen({ route, navigation }) {
     setLandmarkPhoto(null);
   };
 
-  const handleSendReport = () => {
+  const handleSendReport = async () => {
     // Basic validation
     if (!leakType) {
       Alert.alert('Missing info', 'Please select a leak type.');
@@ -196,15 +197,36 @@ export default function LeakReportFormScreen({ route, navigation }) {
       Alert.alert('Missing info', 'Please provide contact person and number.');
       return;
     }
-    
+
     setSubmitting(true);
-    // Simulate submission
-    setTimeout(() => {
+    try {
+      // Build Geom field for backend (comma-separated string)
+      const Geom = coordinates && coordinates.longitude && coordinates.latitude
+        ? `${coordinates.longitude}, ${coordinates.latitude}`
+        : null;
+      // Build payload for backend
+      const payload = {
+  leakType,
+  location,
+  covering,
+  causeOfLeak,
+  causeOther,
+  dma,
+  contactName,
+  contactNumber,
+  landmark,
+  leakPhotos,
+  landmarkPhoto,
+  pressure,
+  meterData,
+  coordinates,
+  geom: Geom,
+      };
+      await submitLeakReport(payload);
       setSubmitting(false);
       Alert.alert('Report sent', 'Your leak report has been submitted successfully.', [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
-      // push an in-app notification summarizing the report
       try {
         pushNotification({
           title: 'Report submitted',
@@ -213,9 +235,11 @@ export default function LeakReportFormScreen({ route, navigation }) {
       } catch (err) {
         console.warn('Failed to push notification:', err);
       }
-
-      console.log('Report:', { meterData, coordinates, leakType, location, covering, causeOfLeak, causeOther, contactName, contactNumber, landmark, leakPhotos, landmarkPhoto, dma, pressure });
-    }, 1500);
+      console.log('Report:', payload);
+    } catch (err) {
+      setSubmitting(false);
+      Alert.alert('Submission failed', err.message || 'Failed to submit report');
+    }
   };
 
   // Load DMA options from server on mount
@@ -234,6 +258,40 @@ export default function LeakReportFormScreen({ route, navigation }) {
     };
     load();
     return () => { mounted = false; };
+  }, []);
+
+  // Auto-populate contact name and number with logged-in user's data
+  useEffect(() => {
+    const loadUserData = async () => {
+      try {
+        const userDataStr = await AsyncStorage.getItem('userData');
+        if (userDataStr) {
+          const userData = JSON.parse(userDataStr);
+          console.log('📝 Loading user data for contact fields:', userData);
+          
+          // Auto-fill contact name with user's full name
+          const firstName = userData.fName || '';
+          const middleName = userData.mName || '';
+          const lastName = userData.lName || '';
+          
+          if (firstName || lastName) {
+            const fullName = `${firstName} ${middleName} ${lastName}`.replace(/\s+/g, ' ').trim();
+            setContactName(fullName);
+            console.log('✅ Contact name auto-filled:', fullName);
+          }
+          
+          // Auto-fill contact number with user's contact number (check multiple possible field names)
+          const contactNum = userData.mobileNo || userData.contactNumber || userData.contactNo || userData.phoneNumber || userData.mobileNumber || '';
+          if (contactNum) {
+            setContactNumber(contactNum);
+            console.log('✅ Contact number auto-filled:', contactNum);
+          }
+        }
+      } catch (err) {
+        console.error('❌ Failed to load user data for contact:', err);
+      }
+    };
+    loadUserData();
   }, []);
 
   return (
@@ -580,9 +638,11 @@ export default function LeakReportFormScreen({ route, navigation }) {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
     </SafeAreaView>
   );
 }
+
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#f5f5f9' },
@@ -780,4 +840,4 @@ const styles = StyleSheet.create({
   dmaText: { fontSize: 14, color: '#334155' },
   modalCancel: { alignItems: 'center', paddingVertical: 12 },
   modalCancelText: { color: '#1e5a8e', fontWeight: '700' },
-});
+})

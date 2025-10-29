@@ -124,12 +124,15 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    justifyContent: 'center',
   },
   content: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 60,
+    paddingTop: 0,
+    paddingBottom: 0,
+    marginBottom: 80, // add space above the wave
   },
   logo: {
     width: 150,
@@ -150,6 +153,7 @@ const styles = StyleSheet.create({
     right: 0,
     height: 200,
     overflow: 'hidden',
+    zIndex: 1,
   },
   waveLayer: {
     position: 'absolute',

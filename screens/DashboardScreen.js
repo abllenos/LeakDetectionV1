@@ -15,7 +15,7 @@ import { useEffect, useState, useRef } from 'react';
 import { Modal, FlatList, ActivityIndicator } from 'react-native';
 import { fetchNotifications, markAllRead, clearNotifications } from '../services/notifications';
 import { startPeriodicDataCheck, stopPeriodicDataCheck } from '../services/dataChecker';
-import { fetchLeakReports } from '../services/api';
+import { fetchLeakReports } from '../services/interceptor';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function DashboardScreen({ navigation }) {
@@ -118,14 +118,21 @@ export default function DashboardScreen({ navigation }) {
           });
           
           console.log('✅ Dashboard user set:', { name: userName, empId: user.empId || user.employeeId || user.id });
+          
+          // Load leak reports with empId
+          setLoadingReports(true);
+          const empId = user.empId || user.employeeId || user.id || user.userId;
+          const reportsData = await fetchLeakReports(empId);
+          console.log('📊 Dashboard received reports data:', {
+            totalReports: (reportsData?.reports || []).length,
+            totalCount: reportsData?.totalCount,
+            dispatchedCount: reportsData?.dispatchedCount,
+            firstReportRefNo: reportsData?.reports?.[0]?.refNo
+          });
+          setLeakReportsData(reportsData);
         } else {
           console.warn('⚠️ No user data found in storage');
         }
-        
-        // Load leak reports
-        setLoadingReports(true);
-        const reportsData = await fetchLeakReports();
-        setLeakReportsData(reportsData);
       } catch (error) {
         console.error('Failed to load dashboard data:', error);
       } finally {
@@ -153,16 +160,6 @@ export default function DashboardScreen({ navigation }) {
       count: leakReportsData?.totalCount || 0,
       color: '#2196F3',
       borderColor: '#2196F3',
-    },
-    {
-      id: 2,
-      iconName: 'send',
-      iconFamily: 'MaterialIcons',
-      title: 'Dispatched',
-      subtitle: 'Sent to field',
-      count: leakReportsData?.dispatchedCount || 0,
-      color: '#4CAF50',
-      borderColor: '#4CAF50',
     },
     {
       id: 3,
@@ -419,13 +416,6 @@ export default function DashboardScreen({ navigation }) {
               </View>
               <View style={styles.quickStatDivider} />
               <View style={styles.quickStatItem}>
-                <Text style={[styles.quickStatValue, { color: '#4CAF50' }]}>
-                  {leakReportsData?.dispatchedCount || 0}
-                </Text>
-                <Text style={styles.quickStatLabel}>Dispatched</Text>
-              </View>
-              <View style={styles.quickStatDivider} />
-              <View style={styles.quickStatItem}>
                 <Text style={[styles.quickStatValue, { color: '#9C27B0' }]}>
                   {leakReportsData?.repairedCount || 0}
                 </Text>
@@ -465,7 +455,7 @@ export default function DashboardScreen({ navigation }) {
           <Text style={styles.sectionTitle}>Recent Activity</Text>
           <TouchableOpacity onPress={async () => {
             setLoadingReports(true);
-            const reportsData = await fetchLeakReports();
+            const reportsData = await fetchLeakReports(userData?.empId);
             setLeakReportsData(reportsData);
             setLoadingReports(false);
           }}>

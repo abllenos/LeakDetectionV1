@@ -15,7 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { API_BASE } from '../services/interceptor';
-import { logout, preCacheCustomers, getAvailableCustomers } from '../services/api';
+import { logout, preCacheCustomers, getAvailableCustomers } from '../services/interceptor';
 import { stopLocationTracking } from '../services/locationTracker';
 import { forceCheckNewData } from '../services/dataChecker';
 import AsyncStorage from '@react-native-async-storage/async-storage';

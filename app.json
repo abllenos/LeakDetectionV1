@@ -9,7 +9,7 @@
       "web"
     ],
     "orientation": "portrait",
-    "icon": "./assets/DCWD LOGO.png",
+  "icon": "./assets/leak.png",
     "updates": {
       "enabled": false
     },
@@ -31,13 +31,14 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
         "CAMERA",
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE"
       ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/DCWD LOGO.png",
-        "backgroundColor": "#1e5a8e"
+        "foregroundImage": "./assets/leak.png",
+        "backgroundColor": "#ffffff"
       }
     },
     "web": {},

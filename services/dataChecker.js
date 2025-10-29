@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { checkForNewData } from './api';
+import { checkForNewData } from './interceptor';
 import { pushNotification } from './notifications';
 
 const LAST_CHECK_KEY = 'lastDataCheck';

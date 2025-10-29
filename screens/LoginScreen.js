@@ -16,7 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { login } from '../services/api';
+import { login } from '../services/interceptor';
 import { Alert } from 'react-native';
 import { startLocationTracking } from '../services/locationTracker';
 
@@ -240,6 +240,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 16,
     elevation: 12,
+    alignItems: 'center',
   },
   logo: {
     width: 100,

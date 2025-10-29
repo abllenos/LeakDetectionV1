@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import MapView, { UrlTile } from 'react-native-maps';
-import { searchAccountOrMeter } from '../services/api';
+import { searchAccountOrMeter } from '../services/interceptor';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 

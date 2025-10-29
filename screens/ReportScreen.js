@@ -2,11 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, StyleSheet, Text, TextInput, TouchableOpacity, Modal, Alert, StatusBar, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets, SafeAreaProvider } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import MapView, { UrlTile, Marker } from 'react-native-maps';
+import MapView, { UrlTile, Marker, Polyline } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 // ...existing imports...
-import { searchAccountOrMeter } from '../services/api';
+import { searchAccountOrMeter } from '../services/interceptor';
 
 export default function ReportScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
@@ -427,18 +427,34 @@ export default function ReportScreen({ navigation, route }) {
 
           {/* Draggable/Confirmed pin (blue, visible in drag mode and after confirmation) */}
           {dragPin && (
-            <Marker
-              key="drag-pin"
-              coordinate={dragPin}
-              draggable={dragMode}
-              pinColor="#3b82f6"
-              title={dragMode ? 'Drag to set location' : 'Selected Location'}
-              description={`Lat: ${dragPin.latitude.toFixed(4)}, Lon: ${dragPin.longitude.toFixed(4)}`}
-              onDragEnd={(e) => {
-                const { latitude, longitude } = e.nativeEvent.coordinate;
-                setDragPin({ latitude, longitude });
-              }}
-            />
+            <>
+              {/* Line connecting red and blue pin */}
+              <Polyline
+                coordinates={[marker, dragPin]}
+                strokeColor="rgba(59, 130, 246, 0.7)" // semi-transparent blue
+                strokeWidth={6}
+                lineDashPattern={[10, 8]} // dashed line
+              />
+              <Marker
+                key="drag-pin"
+                coordinate={dragPin}
+                draggable={dragMode}
+                pinColor="#3b82f6"
+                title={dragMode ? 'Drag to set location' : 'Selected Location'}
+                description={`Lat: ${dragPin.latitude.toFixed(4)}, Lon: ${dragPin.longitude.toFixed(4)}`}
+                onDragEnd={(e) => {
+                  const { latitude, longitude } = e.nativeEvent.coordinate;
+                  setDragPin({ latitude, longitude });
+                  setDragMode(false);
+                  setCoordsLabel(`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+                  Alert.alert('Location Confirmed', 'You can now proceed to report the leak.');
+                }}
+                onDrag={(e) => {
+                  const { latitude, longitude } = e.nativeEvent.coordinate;
+                  setDragPin({ latitude, longitude });
+                }}
+              />
+            </>
           )}
         </MapView>
 
@@ -562,7 +578,7 @@ export default function ReportScreen({ navigation, route }) {
                   <LinearGradient colors={[ '#3a8ec9', '#1e5a8e' ]} style={styles.modalPrimaryGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
                       <Ionicons name="navigate" size={18} color="#fff" style={{ marginRight: 8 }} />
-                      <Text style={styles.modalPrimaryText}>Start Dragging</Text>
+                      <Text style={styles.modalPrimaryText}>Start Pinpoint</Text>
                     </View>
                   </LinearGradient>
                 </TouchableOpacity>
