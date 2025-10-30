@@ -1,12 +1,13 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, StatusBar, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import MapView, { UrlTile, Marker } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle, Polygon, Text as SvgText } from 'react-native-svg';
-import { searchAccountOrMeter, fetchNearestMeters, getAvailableCustomers } from '../services/interceptor';
 import { ActivityIndicator } from 'react-native';
+import { observer } from 'mobx-react-lite';
+import { useNearestMetersStore } from '../stores/RootStore';
 
 // Default map tile source (OpenStreetMap)
 const TILE_SOURCES = [
@@ -15,86 +16,10 @@ const TILE_SOURCES = [
   }
 ];
 
-const NearestMetersScreen = function NearestMetersScreen({ navigation, route }) {
+const NearestMetersScreen = observer(function NearestMetersScreen({ navigation, route }) {
   const { coordinates } = route.params || {};
   const mapRef = useRef(null);
-
-  const [nearestMeters, setNearestMeters] = useState([]);
-  const [selectedMeter, setSelectedMeter] = useState(null);
-  const [loading, setLoading] = useState(false);
-  // Pinpoint drag feature
-  const [dragPin, setDragPin] = useState(null);
-  const [pinReady, setPinReady] = useState(false);
-  const [dragMode, setDragMode] = useState(false);
-
-  // More accurate haversine distance calculation
-  const toRad = (deg) => (deg * Math.PI) / 180;
-  const haversine = (a, b) => {
-    const R = 6371e3; // Earth's radius in meters
-    const lat1 = toRad(a.latitude);
-    const lat2 = toRad(b.latitude);
-    const dLat = toRad(b.latitude - a.latitude);
-    const dLon = toRad(b.longitude - a.longitude);
-
-    const h =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1) * Math.cos(lat2) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2);
-
-    const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-    return R * c;
-  };
-
-  // Fetch nearest meters from API and update state
-  const fetchNearest = async () => {
-    if (!coordinates) return;
-    setLoading(true);
-    try {
-      // Fetch all meters (replace with your actual API call)
-      const all = await getAvailableCustomers();
-      // Calculate distances
-      const allMeters = all.map((it, idx) => {
-        const lat = parseFloat(it.latitude || it.lat);
-        const lng = parseFloat(it.longitude || it.lng);
-        const distance = haversine(
-          { latitude: coordinates.latitude, longitude: coordinates.longitude },
-          { latitude: lat, longitude: lng }
-        );
-        return {
-          id: it.id || it.meterNumber || it.accountNumber || idx,
-          meterId: it.meterNumber || it.accountNumber || it.id || '',
-          accountNumber: it.accountNumber || '',
-          address: it.address || '',
-          latitude: lat,
-          longitude: lng,
-          distance,
-          _raw: it,
-        };
-      });
-      // Sort by distance
-      const sorted = allMeters
-        .filter(m => !isNaN(m.latitude) && !isNaN(m.longitude))
-        .sort((a, b) => a.distance - b.distance);
-
-      // Filter to 3 unique locations (unique lat/lng pairs)
-      const unique = [];
-      const seen = new Set();
-      for (const meter of sorted) {
-        const key = `${meter.latitude},${meter.longitude}`;
-        if (!seen.has(key)) {
-          unique.push(meter);
-          seen.add(key);
-        }
-        if (unique.length === 3) break;
-      }
-      setNearestMeters(unique);
-    } catch (err) {
-      console.warn('searchAccountOrMeter failed', err);
-      setNearestMeters([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const store = useNearestMetersStore();
 
   useEffect(() => {
     if (!coordinates) {
@@ -102,13 +27,13 @@ const NearestMetersScreen = function NearestMetersScreen({ navigation, route }) 
       navigation.goBack();
       return;
     }
-    // invoke
-    fetchNearest();
+    store.reset();
+    store.fetchNearest(coordinates);
     // eslint-disable-next-line
   }, [coordinates]);
 
   const handleMeterSelect = (meter) => {
-    setSelectedMeter(meter);
+    store.setSelectedMeter(meter);
     navigation.navigate('LeakReportForm', {
       meterData: {
         meterNumber: meter.id,
@@ -152,7 +77,7 @@ const NearestMetersScreen = function NearestMetersScreen({ navigation, route }) 
         />
 
         {/* Markers for nearest meters */}
-        {nearestMeters.map((meter, idx) => (
+        {store.nearestMeters.map((meter, idx) => (
           <Marker
             key={`marker-${idx}-${meter.id}`}
             coordinate={{ latitude: meter.latitude, longitude: meter.longitude }}
@@ -172,20 +97,18 @@ const NearestMetersScreen = function NearestMetersScreen({ navigation, route }) 
           </Marker>
         ))}
         {/* Pinpoint drag marker: only show when dragMode is true */}
-        {dragMode && pinReady && dragPin && (
+        {store.dragMode && store.pinReady && store.dragPin && (
           <Marker
             key="drag-pin"
-            coordinate={dragPin}
+            coordinate={store.dragPin}
             draggable={true}
             pinColor="#3b82f6"
             title={'Drag to set location'}
             onDragEnd={e => {
-              setDragPin(e.nativeEvent.coordinate);
-              setDragMode(false);
-              setPinReady(false);
+              store.confirmPinDrag(e.nativeEvent.coordinate);
               Alert.alert('Location Confirmed', 'You can now proceed to report the leak.');
             }}
-            onDrag={e => setDragPin(e.nativeEvent.coordinate)}
+            onDrag={e => store.setDragPin(e.nativeEvent.coordinate)}
           />
         )}
       </MapView>
@@ -210,28 +133,28 @@ const NearestMetersScreen = function NearestMetersScreen({ navigation, route }) 
       {/* Bottom Panel */}
       <View style={styles.panel}>
         {/* Panel for meter list selection */}
-        {!dragMode && (
+        {!store.dragMode && (
           <>
             <Text style={styles.panelTitle}>Select a nearest meter</Text>
             <Text style={styles.panelSubtitle}>
               Up to 3 closest meters to your GPS. Choose from the list below.
             </Text>
-            {loading ? (
+            {store.loading ? (
               <View style={{ paddingVertical: 20, alignItems: 'center' }}>
                 <ActivityIndicator size="small" color="#1e5a8e" />
                 <Text style={{ marginTop: 8, color: '#475569' }}>Looking up meter details…</Text>
               </View>
-            ) : nearestMeters.length === 0 ? (
+            ) : store.nearestMeters.length === 0 ? (
               <View style={{ paddingVertical: 18, alignItems: 'center' }}>
                 <Text style={{ color: '#475569', marginBottom: 10 }}>No nearby meters were found.</Text>
-                <TouchableOpacity onPress={() => fetchNearest()} style={{ paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#1e5a8e', borderRadius: 8 }}>
+                <TouchableOpacity onPress={() => store.fetchNearest(coordinates)} style={{ paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#1e5a8e', borderRadius: 8 }}>
                   <Text style={{ color: '#fff', fontWeight: '700' }}>Retry</Text>
                 </TouchableOpacity>
               </View>
             ) : (
               <>
                 <ScrollView style={styles.panelList} contentContainerStyle={styles.panelListContent}>
-                  {nearestMeters.map((meter, idx) => (
+                  {store.nearestMeters.map((meter, idx) => (
                     <TouchableOpacity
                       key={`item-${idx}-${meter.id}`}
                       style={styles.meterItem}
@@ -264,7 +187,7 @@ const NearestMetersScreen = function NearestMetersScreen({ navigation, route }) 
           </>
         )}
         {/* Panel for drag pin mode: show Start Pinpoint button here */}
-        {dragMode && !pinReady && (
+        {store.dragMode && !store.pinReady && (
           <View style={{ alignItems: 'center', paddingVertical: 24 }}>
             <Text style={{ fontSize: 18, fontWeight: '700', color: '#0f172a', marginBottom: 10 }}>Drag Pin Mode</Text>
             <Text style={{ fontSize: 14, color: '#64748b', marginBottom: 18, textAlign: 'center' }}>
@@ -279,22 +202,7 @@ const NearestMetersScreen = function NearestMetersScreen({ navigation, route }) 
                 flexDirection: 'row',
                 alignItems: 'center',
               }}
-              onPress={() => {
-                // Offset from first meter (red pin) or from coordinates
-                let baseLat = coordinates.latitude;
-                let baseLng = coordinates.longitude;
-                if (nearestMeters.length > 0) {
-                  baseLat = nearestMeters[0].latitude;
-                  baseLng = nearestMeters[0].longitude;
-                }
-                // Increase offset for blue pin (e.g. 0.004 instead of 0.001)
-                setDragPin({
-                  latitude: baseLat + 0.004,
-                  longitude: baseLng + 0.004,
-                });
-                setPinReady(true);
-                setDragMode(true);
-              }}
+              onPress={() => store.startPinpoint(coordinates, store.nearestMeters)}
             >
               <Ionicons name="navigate" size={20} color="#fff" style={{ marginRight: 8 }} />
               <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>Start Pinpoint</Text>
@@ -304,7 +212,8 @@ const NearestMetersScreen = function NearestMetersScreen({ navigation, route }) 
       </View>
     </View>
   );
-}
+});
+
 export default NearestMetersScreen;
 
 const styles = StyleSheet.create({

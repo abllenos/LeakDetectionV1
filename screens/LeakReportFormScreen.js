@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,37 +14,17 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { pushNotification } from '../services/notifications';
-import { fetchDmaCodes, submitLeakReport } from '../services/interceptor';
+import { submitLeakReport } from '../services/interceptor';
+import { observer } from 'mobx-react-lite';
+import { useLeakReportStore } from '../stores/RootStore';
 
-export default function LeakReportFormScreen({ route, navigation }) {
+const LeakReportFormScreen = observer(({ route, navigation }) => {
   const { meterData, coordinates, fromNearest } = route.params || {};
-  
-  // Form state
-  const [leakType, setLeakType] = useState('');
-  const [location, setLocation] = useState('');
-  const [contactName, setContactName] = useState('');
-  const [contactNumber, setContactNumber] = useState('');
-  const [landmark, setLandmark] = useState('');
-  const [leakPhotos, setLeakPhotos] = useState([]);
-  const [landmarkPhoto, setLandmarkPhoto] = useState(null);
-  const [pressure, setPressure] = useState('Low');
-  const [covering, setCovering] = useState('');
-  const [causeOfLeak, setCauseOfLeak] = useState('');
-  const [causeOther, setCauseOther] = useState('');
-  const [dma, setDma] = useState('');
-  const [showDmaModal, setShowDmaModal] = useState(false);
-  const [dmaOptions, setDmaOptions] = useState([]);
-  const [dmaLoading, setDmaLoading] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  
-  // Collapse states
-  const [coveringExpanded, setCoveringExpanded] = useState(false);
-  const [causeExpanded, setCauseExpanded] = useState(false);
+  const form = useLeakReportStore();
 
   const pickLeakPhoto = async () => {
-    if (leakPhotos.length >= 2) {
+    if (form.leakPhotos.length >= 2) {
       Alert.alert('Limit reached', 'You can only upload 2 leak photos.');
       return;
     }
@@ -70,7 +50,7 @@ export default function LeakReportFormScreen({ route, navigation }) {
               aspect: [4, 3],
             });
             if (!result.canceled && result.assets[0]) {
-              setLeakPhotos([...leakPhotos, result.assets[0].uri]);
+              form.addLeakPhoto(result.assets[0].uri);
             }
           }
         },
@@ -91,7 +71,7 @@ export default function LeakReportFormScreen({ route, navigation }) {
               aspect: [4, 3],
             });
             if (!result.canceled && result.assets[0]) {
-              setLeakPhotos([...leakPhotos, result.assets[0].uri]);
+              form.addLeakPhoto(result.assets[0].uri);
             }
           }
         },
@@ -104,8 +84,7 @@ export default function LeakReportFormScreen({ route, navigation }) {
   };
 
   const removeLeakPhoto = (index) => {
-    const updated = leakPhotos.filter((_, i) => i !== index);
-    setLeakPhotos(updated);
+    form.removeLeakPhoto(index);
   };
 
   const pickLandmarkPhoto = async () => {
@@ -130,7 +109,7 @@ export default function LeakReportFormScreen({ route, navigation }) {
               aspect: [4, 3],
             });
             if (!result.canceled && result.assets[0]) {
-              setLandmarkPhoto(result.assets[0].uri);
+              form.setLandmarkPhoto(result.assets[0].uri);
             }
           }
         },
@@ -151,7 +130,7 @@ export default function LeakReportFormScreen({ route, navigation }) {
               aspect: [4, 3],
             });
             if (!result.canceled && result.assets[0]) {
-              setLandmarkPhoto(result.assets[0].uri);
+              form.setLandmarkPhoto(result.assets[0].uri);
             }
           }
         },
@@ -164,41 +143,40 @@ export default function LeakReportFormScreen({ route, navigation }) {
   };
 
   const removeLandmarkPhoto = () => {
-    setLandmarkPhoto(null);
+    form.clearLandmarkPhoto();
   };
 
   const handleSendReport = async () => {
     // Basic validation
-    if (!leakType) {
+    if (!form.leakType) {
       Alert.alert('Missing info', 'Please select a leak type.');
       return;
     }
-    if (!location) {
+    if (!form.location) {
       Alert.alert('Missing info', 'Please select a location (Surface/Non-Surface).');
       return;
     }
-    if (!covering) {
+    if (!form.covering) {
       Alert.alert('Missing info', 'Please select the covering.');
       return;
     }
-    if (!causeOfLeak) {
+    if (!form.causeOfLeak) {
       Alert.alert('Missing info', 'Please select the cause of leak.');
       return;
     }
-    if (causeOfLeak === 'Others' && !causeOther.trim()) {
+    if (form.causeOfLeak === 'Others' && !form.causeOther.trim()) {
       Alert.alert('Missing info', 'Please describe the cause of leak.');
       return;
     }
-    if (!dma) {
+    if (!form.dma) {
       Alert.alert('Missing info', 'Please select a DMA.');
       return;
     }
-    if (!contactName || !contactNumber) {
+    if (!form.contactName || !form.contactNumber) {
       Alert.alert('Missing info', 'Please provide contact person and number.');
       return;
     }
-
-    setSubmitting(true);
+    form.submitting = true;
     try {
       // Build Geom field for backend (comma-separated string)
       const Geom = coordinates && coordinates.longitude && coordinates.latitude
@@ -206,24 +184,24 @@ export default function LeakReportFormScreen({ route, navigation }) {
         : null;
       // Build payload for backend
       const payload = {
-  leakType,
-  location,
-  covering,
-  causeOfLeak,
-  causeOther,
-  dma,
-  contactName,
-  contactNumber,
-  landmark,
-  leakPhotos,
-  landmarkPhoto,
-  pressure,
+  leakType: form.leakType,
+  location: form.location,
+  covering: form.covering,
+  causeOfLeak: form.causeOfLeak,
+  causeOther: form.causeOther,
+  dma: form.dma,
+  contactName: form.contactName,
+  contactNumber: form.contactNumber,
+  landmark: form.landmark,
+  leakPhotos: form.leakPhotos,
+  landmarkPhoto: form.landmarkPhoto,
+  pressure: form.pressure,
   meterData,
   coordinates,
   geom: Geom,
       };
       await submitLeakReport(payload);
-      setSubmitting(false);
+      form.submitting = false;
       Alert.alert('Report sent', 'Your leak report has been submitted successfully.', [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
@@ -237,61 +215,21 @@ export default function LeakReportFormScreen({ route, navigation }) {
       }
       console.log('Report:', payload);
     } catch (err) {
-      setSubmitting(false);
+      form.submitting = false;
       Alert.alert('Submission failed', err.message || 'Failed to submit report');
     }
   };
 
   // Load DMA options from server on mount
   useEffect(() => {
-    let mounted = true;
-    const load = async () => {
-      setDmaLoading(true);
-      try {
-        const codes = await fetchDmaCodes();
-        if (mounted) setDmaOptions(codes);
-      } catch (err) {
-        console.error('Failed to load DMA codes:', err);
-      } finally {
-        if (mounted) setDmaLoading(false);
-      }
-    };
-    load();
-    return () => { mounted = false; };
+    form.reset();
+    form.loadDmaOptions();
+    return () => {};
   }, []);
 
   // Auto-populate contact name and number with logged-in user's data
   useEffect(() => {
-    const loadUserData = async () => {
-      try {
-        const userDataStr = await AsyncStorage.getItem('userData');
-        if (userDataStr) {
-          const userData = JSON.parse(userDataStr);
-          console.log('📝 Loading user data for contact fields:', userData);
-          
-          // Auto-fill contact name with user's full name
-          const firstName = userData.fName || '';
-          const middleName = userData.mName || '';
-          const lastName = userData.lName || '';
-          
-          if (firstName || lastName) {
-            const fullName = `${firstName} ${middleName} ${lastName}`.replace(/\s+/g, ' ').trim();
-            setContactName(fullName);
-            console.log('✅ Contact name auto-filled:', fullName);
-          }
-          
-          // Auto-fill contact number with user's contact number (check multiple possible field names)
-          const contactNum = userData.mobileNo || userData.contactNumber || userData.contactNo || userData.phoneNumber || userData.mobileNumber || '';
-          if (contactNum) {
-            setContactNumber(contactNum);
-            console.log('✅ Contact number auto-filled:', contactNum);
-          }
-        }
-      } catch (err) {
-        console.error('❌ Failed to load user data for contact:', err);
-      }
-    };
-    loadUserData();
+    form.autofillContactFromUser();
   }, []);
 
   return (
@@ -339,34 +277,34 @@ export default function LeakReportFormScreen({ route, navigation }) {
         {/* Pressure */}
         <Text style={styles.sectionLabel}>PRESSURE <Text style={{ color: '#ef4444' }}>*</Text></Text>
         <View style={styles.radioGroupSmall}>
-          <TouchableOpacity style={styles.radioRow} onPress={() => setPressure('Low')}>
-            <View style={[styles.radioCircle, pressure === 'Low' && styles.radioCircleActive]} />
+          <TouchableOpacity style={styles.radioRow} onPress={() => form.setPressure('Low')}>
+            <View style={[styles.radioCircle, form.pressure === 'Low' && styles.radioCircleActive]} />
             <Text style={styles.radioLabel}>LOW</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.radioRow} onPress={() => setPressure('High')}>
-            <View style={[styles.radioCircle, pressure === 'High' && styles.radioCircleActive]} />
+          <TouchableOpacity style={styles.radioRow} onPress={() => form.setPressure('High')}>
+            <View style={[styles.radioCircle, form.pressure === 'High' && styles.radioCircleActive]} />
             <Text style={styles.radioLabel}>HIGH</Text>
           </TouchableOpacity>
         </View>
 
         {/* DMA */}
         <Text style={styles.sectionLabel}>DMA</Text>
-        <TouchableOpacity style={styles.inputWrap} onPress={() => setShowDmaModal(true)}>
+        <TouchableOpacity style={styles.inputWrap} onPress={() => form.setShowDmaModal(true)}>
           <Ionicons name="list" size={18} color="#9aa5b1" style={{ marginRight: 10 }} />
-          <Text style={[styles.input, { paddingVertical: 0 }]}>{dma || 'Select'}</Text>
+          <Text style={[styles.input, { paddingVertical: 0 }]}>{form.dma || 'Select'}</Text>
         </TouchableOpacity>
 
         {/* DMA Selection Modal */}
-        <Modal visible={showDmaModal} transparent animationType="slide" onRequestClose={() => setShowDmaModal(false)}>
+        <Modal visible={form.showDmaModal} transparent animationType="slide" onRequestClose={() => form.setShowDmaModal(false)}>
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Select DMA</Text>
               <ScrollView>
-                {dmaLoading ? (
+                {form.dmaLoading ? (
                   <ActivityIndicator size="small" color="#1e5a8e" />
-                ) : dmaOptions.length ? (
-                  dmaOptions.map((d, i) => (
-                    <TouchableOpacity key={i} style={styles.dmaItem} onPress={() => { setDma(d); setShowDmaModal(false); }}>
+                ) : form.dmaOptions.length ? (
+                  form.dmaOptions.map((d, i) => (
+                    <TouchableOpacity key={i} style={styles.dmaItem} onPress={() => { form.setDma(d); form.setShowDmaModal(false); }}>
                       <Text style={styles.dmaText}>{d}</Text>
                     </TouchableOpacity>
                   ))
@@ -374,7 +312,7 @@ export default function LeakReportFormScreen({ route, navigation }) {
                   <Text style={{ color: '#6b7280', padding: 8 }}>No DMA options available</Text>
                 )}
               </ScrollView>
-              <TouchableOpacity style={[styles.modalCancel, { marginTop: 12 }]} onPress={() => setShowDmaModal(false)}>
+              <TouchableOpacity style={[styles.modalCancel, { marginTop: 12 }]} onPress={() => form.setShowDmaModal(false)}>
                 <Text style={styles.modalCancelText}>Close</Text>
               </TouchableOpacity>
             </View>
@@ -391,30 +329,30 @@ export default function LeakReportFormScreen({ route, navigation }) {
         <Text style={styles.sectionLabel}>Leak Type</Text>
         <View style={styles.buttonGrid}>
           <TouchableOpacity
-            style={[styles.choiceBtn, leakType === 'Unidentified' && styles.choiceBtnActive]}
-            onPress={() => setLeakType('Unidentified')}
+            style={[styles.choiceBtn, form.leakType === 'Unidentified' && styles.choiceBtnActive]}
+            onPress={() => form.setLeakType('Unidentified')}
           >
-            <Text style={[styles.choiceBtnText, leakType === 'Unidentified' && styles.choiceBtnTextActive]}>Unidentified</Text>
+            <Text style={[styles.choiceBtnText, form.leakType === 'Unidentified' && styles.choiceBtnTextActive]}>Unidentified</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.choiceBtn, leakType === 'Serviceline' && styles.choiceBtnActive]}
-            onPress={() => setLeakType('Serviceline')}
+            style={[styles.choiceBtn, form.leakType === 'Serviceline' && styles.choiceBtnActive]}
+            onPress={() => form.setLeakType('Serviceline')}
           >
-            <Text style={[styles.choiceBtnText, leakType === 'Serviceline' && styles.choiceBtnTextActive]}>Serviceline</Text>
+            <Text style={[styles.choiceBtnText, form.leakType === 'Serviceline' && styles.choiceBtnTextActive]}>Serviceline</Text>
           </TouchableOpacity>
         </View>
         <View style={styles.buttonGrid}>
           <TouchableOpacity
-            style={[styles.choiceBtn, leakType === 'Mainline' && styles.choiceBtnActive]}
-            onPress={() => setLeakType('Mainline')}
+            style={[styles.choiceBtn, form.leakType === 'Mainline' && styles.choiceBtnActive]}
+            onPress={() => form.setLeakType('Mainline')}
           >
-            <Text style={[styles.choiceBtnText, leakType === 'Mainline' && styles.choiceBtnTextActive]}>Mainline</Text>
+            <Text style={[styles.choiceBtnText, form.leakType === 'Mainline' && styles.choiceBtnTextActive]}>Mainline</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.choiceBtn, leakType === 'Others' && styles.choiceBtnActive]}
-            onPress={() => setLeakType('Others')}
+            style={[styles.choiceBtn, form.leakType === 'Others' && styles.choiceBtnActive]}
+            onPress={() => form.setLeakType('Others')}
           >
-            <Text style={[styles.choiceBtnText, leakType === 'Others' && styles.choiceBtnTextActive]}>Others</Text>
+            <Text style={[styles.choiceBtnText, form.leakType === 'Others' && styles.choiceBtnTextActive]}>Others</Text>
           </TouchableOpacity>
         </View>
 
@@ -422,54 +360,54 @@ export default function LeakReportFormScreen({ route, navigation }) {
         <Text style={styles.sectionLabel}>Location</Text>
         <View style={styles.buttonGrid}>
           <TouchableOpacity
-            style={[styles.choiceBtn, location === 'Surface' && styles.choiceBtnActive]}
-            onPress={() => setLocation('Surface')}
+            style={[styles.choiceBtn, form.location === 'Surface' && styles.choiceBtnActive]}
+            onPress={() => form.setLocation('Surface')}
           >
-            <Text style={[styles.choiceBtnText, location === 'Surface' && styles.choiceBtnTextActive]}>Surface</Text>
+            <Text style={[styles.choiceBtnText, form.location === 'Surface' && styles.choiceBtnTextActive]}>Surface</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.choiceBtn, location === 'Non-Surface' && styles.choiceBtnActive]}
-            onPress={() => setLocation('Non-Surface')}
+            style={[styles.choiceBtn, form.location === 'Non-Surface' && styles.choiceBtnActive]}
+            onPress={() => form.setLocation('Non-Surface')}
           >
-            <Text style={[styles.choiceBtnText, location === 'Non-Surface' && styles.choiceBtnTextActive]}>Non-Surface</Text>
+            <Text style={[styles.choiceBtnText, form.location === 'Non-Surface' && styles.choiceBtnTextActive]}>Non-Surface</Text>
           </TouchableOpacity>
         </View>
 
         {/* Covering */}
         <TouchableOpacity 
           style={styles.collapseHeader} 
-          onPress={() => setCoveringExpanded(!coveringExpanded)}
+          onPress={() => form.setCoveringExpanded(!form.coveringExpanded)}
           activeOpacity={0.7}
         >
           <View style={styles.collapseHeaderLeft}>
             <Text style={styles.sectionLabel}>COVERING <Text style={{ color: '#ef4444' }}>*</Text></Text>
-            {covering && !coveringExpanded && (
-              <Text style={styles.selectedValue}>{covering}</Text>
+            {form.covering && !form.coveringExpanded && (
+              <Text style={styles.selectedValue}>{form.covering}</Text>
             )}
           </View>
           <Ionicons 
-            name={coveringExpanded ? "chevron-up" : "chevron-down"} 
+            name={form.coveringExpanded ? "chevron-up" : "chevron-down"} 
             size={20} 
             color="#6b7280" 
           />
         </TouchableOpacity>
         
-        {coveringExpanded && (
+        {form.coveringExpanded && (
           <View style={styles.radioList}>
-            <TouchableOpacity style={styles.radioListRow} onPress={() => { setCovering('Concrete'); setCoveringExpanded(false); }}>
-              <View style={[styles.radioCircle, covering === 'Concrete' && styles.radioCircleActive]} />
+            <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCovering('Concrete'); form.setCoveringExpanded(false); }}>
+              <View style={[styles.radioCircle, form.covering === 'Concrete' && styles.radioCircleActive]} />
               <Text style={styles.radioListLabel}>CONCRETE</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.radioListRow} onPress={() => { setCovering('Gravel'); setCoveringExpanded(false); }}>
-              <View style={[styles.radioCircle, covering === 'Gravel' && styles.radioCircleActive]} />
+            <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCovering('Gravel'); form.setCoveringExpanded(false); }}>
+              <View style={[styles.radioCircle, form.covering === 'Gravel' && styles.radioCircleActive]} />
               <Text style={styles.radioListLabel}>GRAVEL</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.radioListRow} onPress={() => { setCovering('Soil'); setCoveringExpanded(false); }}>
-              <View style={[styles.radioCircle, covering === 'Soil' && styles.radioCircleActive]} />
+            <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCovering('Soil'); form.setCoveringExpanded(false); }}>
+              <View style={[styles.radioCircle, form.covering === 'Soil' && styles.radioCircleActive]} />
               <Text style={styles.radioListLabel}>SOIL</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.radioListRow} onPress={() => { setCovering('Asphalt'); setCoveringExpanded(false); }}>
-              <View style={[styles.radioCircle, covering === 'Asphalt' && styles.radioCircleActive]} />
+            <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCovering('Asphalt'); form.setCoveringExpanded(false); }}>
+              <View style={[styles.radioCircle, form.covering === 'Asphalt' && styles.radioCircleActive]} />
               <Text style={styles.radioListLabel}>ASPHALT</Text>
             </TouchableOpacity>
           </View>
@@ -478,51 +416,51 @@ export default function LeakReportFormScreen({ route, navigation }) {
         {/* Cause of Leak */}
         <TouchableOpacity 
           style={styles.collapseHeader} 
-          onPress={() => setCauseExpanded(!causeExpanded)}
+          onPress={() => form.setCauseExpanded(!form.causeExpanded)}
           activeOpacity={0.7}
         >
           <View style={styles.collapseHeaderLeft}>
             <Text style={styles.sectionLabel}>CAUSE OF LEAK <Text style={{ color: '#ef4444' }}>*</Text></Text>
-            {causeOfLeak && !causeExpanded && (
-              <Text style={styles.selectedValue}>{causeOfLeak === 'Others' ? causeOther || 'Others' : causeOfLeak}</Text>
+            {form.causeOfLeak && !form.causeExpanded && (
+              <Text style={styles.selectedValue}>{form.causeOfLeak === 'Others' ? form.causeOther || 'Others' : form.causeOfLeak}</Text>
             )}
           </View>
           <Ionicons 
-            name={causeExpanded ? "chevron-up" : "chevron-down"} 
+            name={form.causeExpanded ? "chevron-up" : "chevron-down"} 
             size={20} 
             color="#6b7280" 
           />
         </TouchableOpacity>
         
-        {causeExpanded && (
+        {form.causeExpanded && (
           <>
             <View style={styles.radioList}>
-              <TouchableOpacity style={styles.radioListRow} onPress={() => { setCauseOfLeak('Exposed - PE'); setCauseExpanded(false); }}>
-                <View style={[styles.radioCircle, causeOfLeak === 'Exposed - PE' && styles.radioCircleActive]} />
+              <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCauseOfLeak('Exposed - PE'); form.setCauseExpanded(false); }}>
+                <View style={[styles.radioCircle, form.causeOfLeak === 'Exposed - PE' && styles.radioCircleActive]} />
                 <Text style={styles.radioListLabel}>Exposed - PE</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.radioListRow} onPress={() => { setCauseOfLeak('Exposed - Supplement'); setCauseExpanded(false); }}>
-                <View style={[styles.radioCircle, causeOfLeak === 'Exposed - Supplement' && styles.radioCircleActive]} />
+              <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCauseOfLeak('Exposed - Supplement'); form.setCauseExpanded(false); }}>
+                <View style={[styles.radioCircle, form.causeOfLeak === 'Exposed - Supplement' && styles.radioCircleActive]} />
                 <Text style={styles.radioListLabel}>Exposed - Supplement</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.radioListRow} onPress={() => { setCauseOfLeak('Defective Stopcock'); setCauseExpanded(false); }}>
-                <View style={[styles.radioCircle, causeOfLeak === 'Defective Stopcock' && styles.radioCircleActive]} />
+              <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCauseOfLeak('Defective Stopcock'); form.setCauseExpanded(false); }}>
+                <View style={[styles.radioCircle, form.causeOfLeak === 'Defective Stopcock' && styles.radioCircleActive]} />
                 <Text style={styles.radioListLabel}>Defective Stopcock</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.radioListRow} onPress={() => setCauseOfLeak('Others')}>
-                <View style={[styles.radioCircle, causeOfLeak === 'Others' && styles.radioCircleActive]} />
+              <TouchableOpacity style={styles.radioListRow} onPress={() => form.setCauseOfLeak('Others')}>
+                <View style={[styles.radioCircle, form.causeOfLeak === 'Others' && styles.radioCircleActive]} />
                 <Text style={styles.radioListLabel}>Others</Text>
               </TouchableOpacity>
             </View>
 
-            {causeOfLeak === 'Others' && (
+            {form.causeOfLeak === 'Others' && (
               <View style={styles.inputWrap}>
                 <TextInput
                   style={styles.input}
                   placeholder="Please describe"
                   placeholderTextColor="#9aa5b1"
-                  value={causeOther}
-                  onChangeText={setCauseOther}
+                  value={form.causeOther}
+                  onChangeText={form.setCauseOther}
                 />
               </View>
             )}
@@ -538,8 +476,8 @@ export default function LeakReportFormScreen({ route, navigation }) {
             style={styles.input}
             placeholder="Name"
             placeholderTextColor="#9aa5b1"
-            value={contactName}
-            onChangeText={setContactName}
+            value={form.contactName}
+            onChangeText={form.setContactName}
           />
         </View>
 
@@ -552,8 +490,8 @@ export default function LeakReportFormScreen({ route, navigation }) {
             placeholder="Phone"
             placeholderTextColor="#9aa5b1"
             keyboardType="phone-pad"
-            value={contactNumber}
-            onChangeText={setContactNumber}
+            value={form.contactNumber}
+            onChangeText={form.setContactNumber}
           />
         </View>
 
@@ -565,8 +503,8 @@ export default function LeakReportFormScreen({ route, navigation }) {
             style={styles.input}
             placeholder="Describe nearby landmark (e.g., store, church)"
             placeholderTextColor="#9aa5b1"
-            value={landmark}
-            onChangeText={setLandmark}
+            value={form.landmark}
+            onChangeText={form.setLandmark}
           />
         </View>
 
@@ -577,12 +515,12 @@ export default function LeakReportFormScreen({ route, navigation }) {
         </View>
         <View style={styles.photoHeader}>
           <Text style={styles.photoLabel}>Leak Photos (2 only)</Text>
-          <Text style={styles.photoCount}>{leakPhotos.length}/2</Text>
+          <Text style={styles.photoCount}>{form.leakPhotos.length}/2</Text>
         </View>
         
         {/* Display leak photos */}
         <View style={styles.photoGrid}>
-          {leakPhotos.map((uri, index) => (
+          {form.leakPhotos.map((uri, index) => (
             <View key={index} style={styles.photoPreview}>
               <Image source={{ uri }} style={styles.photoImage} />
               <TouchableOpacity style={styles.photoRemove} onPress={() => removeLeakPhoto(index)}>
@@ -590,7 +528,7 @@ export default function LeakReportFormScreen({ route, navigation }) {
               </TouchableOpacity>
             </View>
           ))}
-          {leakPhotos.length < 2 && (
+          {form.leakPhotos.length < 2 && (
             <TouchableOpacity style={styles.photoBtn} onPress={pickLeakPhoto}>
               <Ionicons name="camera" size={28} color="#1e5a8e" />
               <Text style={styles.photoBtnLabel}>+</Text>
@@ -601,14 +539,14 @@ export default function LeakReportFormScreen({ route, navigation }) {
         {/* Landmark Photo */}
         <View style={styles.photoHeader}>
           <Text style={styles.photoLabel}>Landmark Photo</Text>
-          <Text style={styles.photoCount}>{landmarkPhoto ? '1' : '0'}/1</Text>
+          <Text style={styles.photoCount}>{form.landmarkPhoto ? '1' : '0'}/1</Text>
         </View>
         
         {/* Display landmark photo */}
         <View style={styles.photoGrid}>
-          {landmarkPhoto ? (
+          {form.landmarkPhoto ? (
             <View style={styles.photoPreview}>
-              <Image source={{ uri: landmarkPhoto }} style={styles.photoImage} />
+              <Image source={{ uri: form.landmarkPhoto }} style={styles.photoImage} />
               <TouchableOpacity style={styles.photoRemove} onPress={removeLandmarkPhoto}>
                 <Ionicons name="close-circle" size={24} color="#ef4444" />
               </TouchableOpacity>
@@ -628,8 +566,8 @@ export default function LeakReportFormScreen({ route, navigation }) {
         </View>
 
         {/* Send Report Button */}
-        <TouchableOpacity style={styles.sendBtn} onPress={handleSendReport} disabled={submitting}>
-          {submitting ? (
+        <TouchableOpacity style={styles.sendBtn} onPress={handleSendReport} disabled={form.submitting}>
+          {form.submitting ? (
             <ActivityIndicator color="#fff" />
           ) : (
             <Text style={styles.sendBtnText}>Send Report</Text>
@@ -641,7 +579,9 @@ export default function LeakReportFormScreen({ route, navigation }) {
 
     </SafeAreaView>
   );
-}
+});
+
+export default LeakReportFormScreen;
 
 
 const styles = StyleSheet.create({

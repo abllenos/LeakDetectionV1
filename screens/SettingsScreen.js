@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   Text,
@@ -19,361 +19,33 @@ import { logout, preCacheCustomers, getAvailableCustomers } from '../services/in
 import { stopLocationTracking } from '../services/locationTracker';
 import { forceCheckNewData } from '../services/dataChecker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { observer } from 'mobx-react-lite';
+import { useSettingsStore } from '../stores/RootStore';
 
-export default function SettingsScreen({ navigation }) {
-  const [mapsStatus, setMapsStatus] = useState('Offline Mode');
-  const [cachedTiles, setCachedTiles] = useState(144);
-  const [storageUsed, setStorageUsed] = useState(2.1); // MB
-  const [mapsLoading, setMapsLoading] = useState(false);
-  const [updateModalVisible, setUpdateModalVisible] = useState(false);
-  const [updateProgress, setUpdateProgress] = useState(0);
-  const [updateSuccess, setUpdateSuccess] = useState(false);
-
-  const [clearCacheModalVisible, setClearCacheModalVisible] = useState(false);
-  const [clearingCache, setClearingCache] = useState(false);
-
-  const [clientDataAvailable, setClientDataAvailable] = useState(true);
-  const [clientRecordCount, setClientRecordCount] = useState(0);
-  const [clientLoading, setClientLoading] = useState(false);
-  const [downloadPreset, setDownloadPreset] = useState('normal'); // 'safe' | 'normal' | 'fast'
-  const [clientDeleteModalVisible, setClientDeleteModalVisible] = useState(false);
-  const [clientDeleting, setClientDeleting] = useState(false);
-  const [clientModalVisible, setClientModalVisible] = useState(false);
-  const [clientProgress, setClientProgress] = useState(0);
-  const [clientSuccess, setClientSuccess] = useState(false);
-  const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false); // Track if updating existing data
-  
-  const [logoutModalVisible, setLogoutModalVisible] = useState(false);
-  const [checkingUpdates, setCheckingUpdates] = useState(false);
+const SettingsScreen = observer(({ navigation }) => {
+  const store = useSettingsStore();
 
   // Check if customer data is cached on mount and poll during download
-  React.useEffect(() => {
-    checkCachedData();
-    loadPreset();
-    
-    // Poll for count updates during download (very fast, just reads one key)
+  useEffect(() => {
+    store.checkCachedData();
+    store.loadPreset();
+
     const interval = setInterval(() => {
-      if (clientLoading) {
-        checkCachedData();
+      if (store.clientLoading) {
+        store.checkCachedData();
       }
-    }, 3000); // Check every 3 seconds
-    
+    }, 3000);
     return () => clearInterval(interval);
-  }, [clientLoading]);
-
-  const loadPreset = async () => {
-    try {
-      const p = await AsyncStorage.getItem('download_preset');
-      if (p) setDownloadPreset(p);
-    } catch (e) {
-      console.warn('Failed to load download preset:', e?.message || e);
-    }
-  };
-
-  const checkCachedData = async () => {
-    try {
-      // Check completed download FIRST (existing data)
-      const chunkCount = await AsyncStorage.getItem('allCustomers_chunks');
-      const cachedCount = await AsyncStorage.getItem('allCustomers_count');
-      
-      if (chunkCount && cachedCount) {
-        const count = parseInt(cachedCount);
-        console.log(`📦 Download complete: ${count} customers available`);
-        setClientDataAvailable(true);
-        setClientRecordCount(count);
-        
-        // If there's also a download in progress, we'll show the cached count
-        // The download will update this when it completes
-        return;
-      }
-      
-      // If no completed download, check if download is in progress (fast count)
-      const downloadCount = await AsyncStorage.getItem('allCustomers_download_count');
-      if (downloadCount) {
-        const count = parseInt(downloadCount);
-        console.log(`📥 Download in progress: ${count} customers downloaded`);
-        setClientDataAvailable(true);
-        setClientRecordCount(count);
-        return;
-      }
-      
-      // Check if download just started (manifest exists but count not yet written)
-      const manifest = await AsyncStorage.getItem('allCustomers_manifest');
-      if (manifest) {
-        try {
-          const manifestData = JSON.parse(manifest);
-          if (manifestData.status === 'in-progress') {
-            const pagesFetched = Array.isArray(manifestData.pagesFetched) ? manifestData.pagesFetched.length : 0;
-            const estimatedRecords = pagesFetched * 50; // Approximate: 50 records per page
-            console.log(`📥 Download starting: ~${estimatedRecords} customers (estimated)`);
-            setClientDataAvailable(true);
-            setClientRecordCount(estimatedRecords);
-            return;
-          }
-        } catch (e) {
-          console.warn('Failed to parse manifest:', e);
-        }
-      }
-      
-      console.log('⚠️ No customer data found');
-      setClientDataAvailable(false);
-      setClientRecordCount(0);
-    } catch (error) {
-      console.error('Failed to check cache:', error);
-      setClientDataAvailable(false);
-      setClientRecordCount(0);
-    }
-  };
-
-  const checkForDataUpdates = async () => {
-    setCheckingUpdates(true);
-    try {
-      console.log('🔍 Manually checking for data updates...');
-      const result = await forceCheckNewData();
-      
-      if (result) {
-        // Notification was created
-        Alert.alert(
-          result.title,
-          result.message,
-          [
-            { text: 'Later', style: 'cancel' },
-            { 
-              text: 'Download Now', 
-              onPress: () => downloadClientData()
-            }
-          ]
-        );
-      } else {
-        Alert.alert(
-          'No Updates',
-          'Your customer data is up to date!',
-          [{ text: 'OK' }]
-        );
-      }
-    } catch (error) {
-      console.error('Failed to check for updates:', error);
-      Alert.alert(
-        'Check Failed',
-        'Failed to check for updates. Please try again.',
-        [{ text: 'OK' }]
-      );
-    } finally {
-      setCheckingUpdates(false);
-    }
-  };
-
-  const updateMaps = () => {
-    // open modal to confirm and show progress
-    setUpdateModalVisible(true);
-    setUpdateProgress(0);
-    setUpdateSuccess(false);
-  };
-
-  const startMapDownload = () => {
-    setMapsLoading(true);
-    setUpdateProgress(0);
-    setUpdateSuccess(false);
-
-    // simulate progress
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += Math.floor(Math.random() * 20) + 10; // random increments
-      if (progress >= 100) progress = 100;
-      setUpdateProgress(progress);
-
-      if (progress >= 100) {
-        clearInterval(interval);
-        // finalize
-        setTimeout(() => {
-          setCachedTiles((n) => n + 10);
-          setStorageUsed((s) => +(s + 0.15).toFixed(2));
-          setMapsStatus('Offline Mode');
-          setMapsLoading(false);
-          setUpdateSuccess(true);
-        }, 500);
-      }
-    }, 350);
-  };
-
-  const clearCache = () => {
-    // show a nicer modal confirmation for clearing cache
-    setClearCacheModalVisible(true);
-  };
-
-  const confirmClearCache = () => {
-    setClearingCache(true);
-    setTimeout(() => {
-      setCachedTiles(0);
-      setStorageUsed(0);
-      setMapsStatus('Offline Mode');
-      setClearingCache(false);
-      setClearCacheModalVisible(false);
-      Alert.alert('Cache cleared', 'Offline map cache has been removed.');
-    }, 800);
-  };
-
-  const cancelClearCache = () => {
-    if (!clearingCache) setClearCacheModalVisible(false);
-  };
-
-  const deleteClientData = () => {
-    // show improved in-app modal confirmation
-    setClientDeleteModalVisible(true);
-  };
-
-  const confirmDeleteClientData = async () => {
-    setClientDeleting(true);
-    try {
-      // Clear all customer cache
-      await AsyncStorage.removeItem('allCustomers');
-      await AsyncStorage.removeItem('allCustomers_timestamp');
-      console.log('✓ Cleared customer cache');
-      
-      setClientDataAvailable(false);
-      setClientDeleting(false);
-      setClientLoading(false);
-      setClientDeleteModalVisible(false);
-      Alert.alert('Deleted', 'Offline customer data removed.');
-    } catch (error) {
-      console.error('Failed to delete cache:', error);
-      Alert.alert('Error', 'Failed to delete offline data');
-      setClientDeleting(false);
-    }
-  };
-
-  const cancelDeleteClientData = () => {
-    if (!clientDeleting) setClientDeleteModalVisible(false);
-  };
-
-  const clearAllStorageData = () => {
-    Alert.alert(
-      'Clear All Data',
-      'This will remove ALL cached data including offline customer data, download progress, and settings. Your login credentials will be preserved. This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Clear All', 
-          style: 'destructive',
-          onPress: confirmClearAllStorage
-        }
-      ]
-    );
-  };
-
-  const confirmClearAllStorage = async () => {
-    try {
-      console.log('🗑️ Clearing all AsyncStorage data...');
-      
-      // Get all keys
-      const allKeys = await AsyncStorage.getAllKeys();
-      console.log(`📦 Found ${allKeys.length} storage keys`);
-      
-      // Filter keys to preserve login credentials
-      const keysToPreserve = ['savedUsername', 'savedPassword', 'rememberMe', 'authToken', 'refreshToken', 'userData'];
-      const keysToRemove = allKeys.filter(key => !keysToPreserve.includes(key));
-      
-      console.log(`🔒 Preserving ${keysToPreserve.length} authentication keys`);
-      console.log(`🗑️ Removing ${keysToRemove.length} data keys`);
-      
-      // Remove all non-auth keys
-      await AsyncStorage.multiRemove(keysToRemove);
-      
-      console.log('✅ Storage cleared successfully');
-      
-      // Reset all UI states
-      setClientDataAvailable(false);
-      setClientRecordCount(0);
-      setClientLoading(false);
-      setClientProgress(0);
-      setCachedTiles(0);
-      setStorageUsed(0);
-      
-      Alert.alert(
-        'Success', 
-        `Cleared ${keysToRemove.length} storage items. Your login credentials are preserved.`,
-        [{ text: 'OK', onPress: () => checkCachedData() }]
-      );
-    } catch (error) {
-      console.error('❌ Failed to clear storage:', error);
-      Alert.alert('Error', 'Failed to clear storage data: ' + error.message);
-    }
-  };
-
-  const downloadClientData = () => {
-    // Check if there's existing data to determine if this is an update
-    const checkExisting = async () => {
-      const cachedCount = await AsyncStorage.getItem('allCustomers_count');
-      setIsDownloadingUpdate(!!cachedCount && parseInt(cachedCount) > 0);
-    };
-    checkExisting();
-    
-    // show modal to confirm and display progress
-    setClientModalVisible(true);
-    setClientProgress(0);
-    setClientSuccess(false);
-  };
-
-  const startClientDownload = async () => {
-    // Start download in background and allow user to close modal immediately
-    setClientLoading(true);
-    setClientProgress(0);
-    setClientSuccess(false);
-
-    // close modal so user can continue using app
-    setClientModalVisible(false);
-
-    // Fire-and-forget the preCacheCustomers but keep updating UI via callbacks/promises
-    // pick options based on preset
-    const presetOpts = () => {
-      switch (downloadPreset) {
-        case 'safe':
-          return { pageSize: 500, concurrency: 2 };
-        case 'fast':
-          return { pageSize: 2000, concurrency: 6 };
-        case 'normal':
-        default:
-          return { pageSize: 1000, concurrency: 4 };
-      }
-    };
-
-    preCacheCustomers((progress) => {
-      try {
-        setClientProgress(progress);
-      } catch (e) {
-        // ignore setState after unmount cases
-      }
-    }, presetOpts())
-      .then(async () => {
-        setClientLoading(false);
-        setClientSuccess(true);
-        setClientProgress(100);
-        setIsDownloadingUpdate(false); // Reset update flag
-        console.log('✓ Customer data downloaded successfully (background)');
-        
-        // Refresh cached data count
-        await checkCachedData();
-        
-        Alert.alert('Download complete', 'Offline client data is ready');
-      })
-      .catch((error) => {
-        console.error('Background download failed:', error);
-        setClientLoading(false);
-        setClientSuccess(false);
-        Alert.alert('Download Failed', error?.message || 'Failed to download customer data');
-      });
-  };
+  }, [store.clientLoading]);
 
   const cancelClientModal = () => {
-    // Allow closing the modal even when a background download is happening
-    setClientModalVisible(false);
-    // Do not reset progress/state here so the background download banner can continue to show
+    store.setClientModalVisible(false);
   };
 
   // (Download manifest/status removed - handled by Offline Meter Search Data section)
 
   const handleLogout = () => {
-    setLogoutModalVisible(true);
+    store.setLogoutModalVisible(true);
   };
 
   const confirmLogout = async () => {
@@ -383,7 +55,7 @@ export default function SettingsScreen({ navigation }) {
     // Clear authentication tokens
     await logout();
     
-    setLogoutModalVisible(false);
+  store.setLogoutModalVisible(false);
     // Navigate back to login and reset the navigation stack
     navigation.reset({
       index: 0,
@@ -392,11 +64,11 @@ export default function SettingsScreen({ navigation }) {
   };
 
   const cancelLogout = () => {
-    setLogoutModalVisible(false);
+    store.setLogoutModalVisible(false);
   };
 
   return (
-    <View style={styles.safe}>
+  <View style={styles.safe}>
       <StatusBar barStyle="light-content" backgroundColor="#1e5a8e" translucent />
       {/* Header with Gradient */}
       <LinearGradient
@@ -415,9 +87,9 @@ export default function SettingsScreen({ navigation }) {
       <ScrollView contentContainerStyle={styles.container}>
 
         {/* Background download progress banner */}
-        {clientLoading ? (
+        {store.clientLoading ? (
           <View style={styles.backgroundDownloadBanner}>
-            <Text style={styles.bannerText}>Downloading client data... {clientProgress}%</Text>
+            <Text style={styles.bannerText}>Downloading client data... {store.clientProgress}%</Text>
           </View>
         ) : null}
 
@@ -432,27 +104,27 @@ export default function SettingsScreen({ navigation }) {
           <View style={styles.row}>
             <Text style={styles.label}>Status:</Text>
             <View style={styles.statusBadge}>
-              <Text style={styles.statusText}>{mapsStatus}</Text>
+              <Text style={styles.statusText}>{store.mapsStatus}</Text>
             </View>
           </View>
 
           <View style={styles.rowBetween}>
             <View>
               <Text style={styles.smallLabel}>Cached Tiles:</Text>
-              <Text style={styles.valueText}>{cachedTiles}</Text>
+              <Text style={styles.valueText}>{store.cachedTiles}</Text>
             </View>
             <View>
               <Text style={styles.smallLabel}>Storage Used:</Text>
-              <Text style={styles.valueText}>{storageUsed} MB</Text>
+              <Text style={styles.valueText}>{store.storageUsed} MB</Text>
             </View>
           </View>
 
           <View style={styles.actionsRow}>
-            <TouchableOpacity style={styles.primaryBtn} onPress={updateMaps} disabled={mapsLoading}>
-              {mapsLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Update Maps</Text>}
+            <TouchableOpacity style={styles.primaryBtn} onPress={store.updateMaps.bind(store)} disabled={store.mapsLoading}>
+              {store.mapsLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Update Maps</Text>}
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.outlineBtn} onPress={clearCache}>
+            <TouchableOpacity style={styles.outlineBtn} onPress={store.clearCache.bind(store)}>
               <Text style={styles.outlineBtnText}>Clear Cache</Text>
             </TouchableOpacity>
           </View>
@@ -469,35 +141,35 @@ export default function SettingsScreen({ navigation }) {
             <View>
               <Text style={styles.smallLabel}>Status:</Text>
               <Text style={styles.valueText}>
-                {clientLoading && isDownloadingUpdate
-                  ? `Updating... (${clientRecordCount.toLocaleString()} → downloading new data)`
-                  : clientDataAvailable 
-                    ? `Available (${clientRecordCount.toLocaleString()} customers)` 
-                    : clientLoading
-                      ? `Downloading... (${clientRecordCount.toLocaleString()} customers)`
+                {store.clientLoading && store.isDownloadingUpdate
+                  ? `Updating... (${store.clientRecordCount.toLocaleString()} → downloading new data)`
+                  : store.clientDataAvailable 
+                    ? `Available (${store.clientRecordCount.toLocaleString()} customers)` 
+                    : store.clientLoading
+                      ? `Downloading... (${store.clientRecordCount.toLocaleString()} customers)`
                       : 'Not available'}
               </Text>
             </View>
           </View>
 
           <View style={styles.actionsCol}>
-            <TouchableOpacity style={styles.outlineBtnFull} onPress={deleteClientData} disabled={clientLoading || !clientDataAvailable}>
-              {clientLoading && !clientDataAvailable ? <ActivityIndicator /> : <Text style={styles.outlineBtnText}>Delete Offline Client Data</Text>}
+            <TouchableOpacity style={styles.outlineBtnFull} onPress={store.deleteClientData.bind(store)} disabled={store.clientLoading || !store.clientDataAvailable}>
+              {store.clientLoading && !store.clientDataAvailable ? <ActivityIndicator /> : <Text style={styles.outlineBtnText}>Delete Offline Client Data</Text>}
             </TouchableOpacity>
 
             <TouchableOpacity 
               style={[styles.outlineBtnFull, { borderColor: '#ef4444', marginTop: 8 }]} 
-              onPress={clearAllStorageData}
+              onPress={store.clearAllStorageData.bind(store)}
             >
               <Text style={[styles.outlineBtnText, { color: '#ef4444' }]}>Clear All Storage Data</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.primaryBtnFull} onPress={downloadClientData} disabled={clientLoading}>
-              {clientLoading ? (
+            <TouchableOpacity style={styles.primaryBtnFull} onPress={store.downloadClientData.bind(store)} disabled={store.clientLoading}>
+              {store.clientLoading ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <ActivityIndicator color="#fff" />
                   <Text style={styles.primaryBtnText}>
-                    {isDownloadingUpdate ? 'Updating...' : 'Downloading...'}
+                    {store.isDownloadingUpdate ? 'Updating...' : 'Downloading...'}
                   </Text>
                 </View>
               ) : (
@@ -507,15 +179,15 @@ export default function SettingsScreen({ navigation }) {
 
             <TouchableOpacity 
               style={[styles.secondaryBtnFull, { marginTop: 8 }]} 
-              onPress={checkForDataUpdates} 
-              disabled={checkingUpdates || clientLoading || !clientDataAvailable}
+              onPress={store.checkForDataUpdates.bind(store)} 
+              disabled={store.checkingUpdates || store.clientLoading || !store.clientDataAvailable}
             >
-              {checkingUpdates ? (
+              {store.checkingUpdates ? (
                 <ActivityIndicator color="#2196F3" />
               ) : (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Ionicons name="sync" size={18} color={!clientDataAvailable ? "#94a3b8" : "#2196F3"} />
-                  <Text style={[styles.secondaryBtnText, !clientDataAvailable && { color: '#94a3b8' }]}>
+                  <Ionicons name="sync" size={18} color={!store.clientDataAvailable ? "#94a3b8" : "#2196F3"} />
+                  <Text style={[styles.secondaryBtnText, !store.clientDataAvailable && { color: '#94a3b8' }]}>
                     Check for Data Updates
                   </Text>
                 </View>
@@ -526,14 +198,14 @@ export default function SettingsScreen({ navigation }) {
             <View style={{ marginTop: 12 }}>
               <Text style={{ color: '#6b7280', marginBottom: 8 }}>Download speed preset</Text>
               <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity onPress={async () => { setDownloadPreset('safe'); await AsyncStorage.setItem('download_preset', 'safe'); }} style={[styles.presetBtn, downloadPreset === 'safe' ? styles.presetActive : null]}>
-                  <Text style={downloadPreset === 'safe' ? styles.presetTextActive : styles.presetText}>Safe</Text>
+                <TouchableOpacity onPress={async () => { await store.savePreset('safe'); }} style={[styles.presetBtn, store.downloadPreset === 'safe' ? styles.presetActive : null]}>
+                  <Text style={store.downloadPreset === 'safe' ? styles.presetTextActive : styles.presetText}>Safe</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={async () => { setDownloadPreset('normal'); await AsyncStorage.setItem('download_preset', 'normal'); }} style={[styles.presetBtn, downloadPreset === 'normal' ? styles.presetActive : null]}>
-                  <Text style={downloadPreset === 'normal' ? styles.presetTextActive : styles.presetText}>Normal</Text>
+                <TouchableOpacity onPress={async () => { await store.savePreset('normal'); }} style={[styles.presetBtn, store.downloadPreset === 'normal' ? styles.presetActive : null]}>
+                  <Text style={store.downloadPreset === 'normal' ? styles.presetTextActive : styles.presetText}>Normal</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={async () => { setDownloadPreset('fast'); await AsyncStorage.setItem('download_preset', 'fast'); }} style={[styles.presetBtn, downloadPreset === 'fast' ? styles.presetActive : null]}>
-                  <Text style={downloadPreset === 'fast' ? styles.presetTextActive : styles.presetText}>Fast</Text>
+                <TouchableOpacity onPress={async () => { await store.savePreset('fast'); }} style={[styles.presetBtn, store.downloadPreset === 'fast' ? styles.presetActive : null]}>
+                  <Text style={store.downloadPreset === 'fast' ? styles.presetTextActive : styles.presetText}>Fast</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -573,8 +245,8 @@ export default function SettingsScreen({ navigation }) {
       <Modal
         animationType="fade"
         transparent={true}
-        visible={clientDeleteModalVisible}
-        onRequestClose={cancelDeleteClientData}
+        visible={store.clientDeleteModalVisible}
+        onRequestClose={() => store.setClientDeleteModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
@@ -590,13 +262,13 @@ export default function SettingsScreen({ navigation }) {
             <Text style={styles.modalMessage}>This will remove all downloaded client search data. The app will no longer be able to search meters offline.</Text>
 
             <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalCancelBtn} onPress={cancelDeleteClientData} disabled={clientDeleting}>
-                <Text style={styles.modalCancelText}>{clientDeleting ? 'Please wait' : 'Cancel'}</Text>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => store.setClientDeleteModalVisible(false)} disabled={store.clientDeleting}>
+                <Text style={styles.modalCancelText}>{store.clientDeleting ? 'Please wait' : 'Cancel'}</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={[styles.modalConfirmBtn, { borderColor: '#ef4444' }]} onPress={confirmDeleteClientData} disabled={clientDeleting}>
+              <TouchableOpacity style={[styles.modalConfirmBtn, { borderColor: '#ef4444' }]} onPress={store.confirmDeleteClientData.bind(store)} disabled={store.clientDeleting}>
                 <LinearGradient colors={[ '#ef4444', '#f43f5e' ]} style={styles.modalConfirmGradient}>
-                  {clientDeleting ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalConfirmText}>Delete</Text>}
+                  {store.clientDeleting ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalConfirmText}>Delete</Text>}
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -608,7 +280,7 @@ export default function SettingsScreen({ navigation }) {
       <Modal
         animationType="fade"
         transparent={true}
-        visible={clientModalVisible}
+        visible={store.clientModalVisible}
         onRequestClose={cancelClientModal}
       >
         <View style={styles.modalOverlay}>
@@ -617,12 +289,12 @@ export default function SettingsScreen({ navigation }) {
             <Text style={styles.modalMessageSmall}>Download offline client search data to enable meter lookups without network access.</Text>
 
             <View style={styles.progressWrap}>
-              {!clientSuccess ? (
+              {!store.clientSuccess ? (
                 <>
                   <View style={styles.progressBarBackground}>
-                    <View style={[styles.progressBarFill, { width: `${clientProgress}%`, backgroundColor: '#10b981' }]} />
+                    <View style={[styles.progressBarFill, { width: `${store.clientProgress}%`, backgroundColor: '#10b981' }]} />
                   </View>
-                  <Text style={styles.progressText}>{clientProgress}%</Text>
+                  <Text style={styles.progressText}>{store.clientProgress}%</Text>
                 </>
               ) : (
                 <Text style={styles.successText}>Client data downloaded ✅</Text>
@@ -630,26 +302,26 @@ export default function SettingsScreen({ navigation }) {
             </View>
 
             <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalCancelBtn} onPress={cancelClientModal} disabled={clientLoading}>
-                <Text style={styles.modalCancelText}>{clientLoading ? 'Please wait' : 'Cancel'}</Text>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={cancelClientModal} disabled={store.clientLoading}>
+                <Text style={styles.modalCancelText}>{store.clientLoading ? 'Please wait' : 'Cancel'}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.modalConfirmBtn}
                 onPress={() => {
-                  if (clientSuccess) {
+                  if (store.clientSuccess) {
                     // close the modal when user taps Done
-                    setClientModalVisible(false);
-                    setClientProgress(0);
-                    setClientSuccess(false);
+                    store.setClientModalVisible(false);
+                    store.setClientProgress(0);
+                    store.setClientSuccess(false);
                   } else {
-                    startClientDownload();
+                    store.startClientDownload();
                   }
                 }}
-                disabled={clientLoading}
+                disabled={store.clientLoading}
               >
                 <LinearGradient colors={[ '#10b981', '#059669' ]} style={styles.modalConfirmGradient}>
-                  <Text style={styles.modalConfirmText}>{clientLoading ? 'Downloading...' : clientSuccess ? 'Done' : 'Download'}</Text>
+                  <Text style={styles.modalConfirmText}>{store.clientLoading ? 'Downloading...' : store.clientSuccess ? 'Done' : 'Download'}</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -660,8 +332,8 @@ export default function SettingsScreen({ navigation }) {
       <Modal
         animationType="fade"
         transparent={true}
-        visible={clearCacheModalVisible}
-        onRequestClose={cancelClearCache}
+        visible={store.clearCacheModalVisible}
+        onRequestClose={() => store.setClearCacheModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
@@ -674,12 +346,12 @@ export default function SettingsScreen({ navigation }) {
             <Text style={styles.modalMessage}>This will remove all offline map tiles cached on your device. You can re-download them later.</Text>
 
             <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalCancelBtn} onPress={cancelClearCache} disabled={clearingCache}>
-                <Text style={styles.modalCancelText}>{clearingCache ? 'Please wait' : 'Cancel'}</Text>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => store.setClearCacheModalVisible(false)} disabled={store.clearingCache}>
+                <Text style={styles.modalCancelText}>{store.clearingCache ? 'Please wait' : 'Cancel'}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalConfirmBtn, { borderColor: '#f97316' }]} onPress={confirmClearCache} disabled={clearingCache}>
+              <TouchableOpacity style={[styles.modalConfirmBtn, { borderColor: '#f97316' }]} onPress={store.confirmClearCache.bind(store)} disabled={store.clearingCache}>
                 <LinearGradient colors={[ '#f97316', '#f43f5e' ]} style={styles.modalConfirmGradient}>
-                  {clearingCache ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalConfirmText}>Clear Cache</Text>}
+                  {store.clearingCache ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalConfirmText}>Clear Cache</Text>}
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -690,8 +362,8 @@ export default function SettingsScreen({ navigation }) {
       <Modal
         animationType="fade"
         transparent={true}
-        visible={updateModalVisible}
-        onRequestClose={() => setUpdateModalVisible(false)}
+        visible={store.updateModalVisible}
+        onRequestClose={() => store.setUpdateModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.updateModalContainer}>
@@ -700,12 +372,12 @@ export default function SettingsScreen({ navigation }) {
 
             {/* Progress area */}
             <View style={styles.progressWrap}>
-              {!updateSuccess ? (
+              {!store.updateSuccess ? (
                 <>
                   <View style={styles.progressBarBackground}>
-                    <View style={[styles.progressBarFill, { width: `${updateProgress}%` }]} />
+                    <View style={[styles.progressBarFill, { width: `${store.updateProgress}%` }]} />
                   </View>
-                  <Text style={styles.progressText}>{updateProgress}%</Text>
+                  <Text style={styles.progressText}>{store.updateProgress}%</Text>
                 </>
               ) : (
                 <Text style={styles.successText}>Maps updated successfully ✅</Text>
@@ -716,31 +388,31 @@ export default function SettingsScreen({ navigation }) {
               <TouchableOpacity
                 style={styles.modalCancelBtn}
                 onPress={() => {
-                  if (!mapsLoading) setUpdateModalVisible(false);
+                  if (!store.mapsLoading) store.setUpdateModalVisible(false);
                 }}
-                disabled={mapsLoading}
+                disabled={store.mapsLoading}
               >
-                <Text style={styles.modalCancelText}>{mapsLoading ? 'Please wait' : 'Cancel'}</Text>
+                <Text style={styles.modalCancelText}>{store.mapsLoading ? 'Please wait' : 'Cancel'}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.modalConfirmBtn}
                 onPress={() => {
-                  if (updateSuccess) {
-                    setUpdateModalVisible(false);
-                    setUpdateProgress(0);
-                    setUpdateSuccess(false);
+                  if (store.updateSuccess) {
+                    store.setUpdateModalVisible(false);
+                    store.setUpdateProgress(0);
+                    store.setUpdateSuccess(false);
                   } else {
-                    startMapDownload();
+                    store.startMapDownload();
                   }
                 }}
-                disabled={mapsLoading}
+                disabled={store.mapsLoading}
               >
                 <LinearGradient
                   colors={['#1e5a8e', '#0f4a78']}
                   style={styles.modalConfirmGradient}
                 >
-                  <Text style={styles.modalConfirmText}>{mapsLoading ? 'Downloading...' : updateSuccess ? 'Done' : 'Start'}</Text>
+                  <Text style={styles.modalConfirmText}>{store.mapsLoading ? 'Downloading...' : store.updateSuccess ? 'Done' : 'Start'}</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -750,7 +422,7 @@ export default function SettingsScreen({ navigation }) {
       <Modal
         animationType="fade"
         transparent={true}
-        visible={logoutModalVisible}
+        visible={store.logoutModalVisible}
         onRequestClose={cancelLogout}
       >
         <View style={styles.modalOverlay}>
@@ -804,7 +476,7 @@ export default function SettingsScreen({ navigation }) {
       </Modal>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#f0f4f8' },
@@ -1005,3 +677,5 @@ const styles = StyleSheet.create({
   progressText: { marginTop: 8, fontSize: 13, color: '#374151', fontWeight: '600' },
   successText: { fontSize: 14, color: '#059669', fontWeight: '700', marginBottom: 6 },
 });
+
+export default SettingsScreen;

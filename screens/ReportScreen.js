@@ -1,79 +1,28 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Text, TextInput, TouchableOpacity, Modal, Alert, StatusBar, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets, SafeAreaProvider } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import MapView, { UrlTile, Marker, Polyline } from 'react-native-maps';
-import * as Location from 'expo-location';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
-// ...existing imports...
-import { searchAccountOrMeter } from '../services/interceptor';
+import { observer } from 'mobx-react-lite';
+import { useReportMapStore } from '../stores/RootStore';
 
-export default function ReportScreen({ navigation, route }) {
+const ReportScreen = observer(({ navigation, route }) => {
   const insets = useSafeAreaInsets();
-  // No-API tile sources (for development/testing). Be mindful of provider policies.
+  const store = useReportMapStore();
+  const mapRef = useRef(null);
+  
   const TILE_SOURCES = [
     { name: 'OSM DE', url: 'https://tile.openstreetmap.de/{z}/{x}/{y}.png', attribution: '© OpenStreetMap contributors' },
     { name: 'OSM FR', url: 'https://a.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', attribution: '© OpenStreetMap contributors' },
     { name: 'HOT', url: 'https://a.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', attribution: '© OpenStreetMap contributors' },
   ];
-  const [tileIndex, setTileIndex] = useState(0);
-  const mapRef = useRef(null);
-  const [region, setRegion] = useState({
-    latitude: 7.0731,
-    longitude: 125.6129,
-    latitudeDelta: 0.05,
-    longitudeDelta: 0.05,
-  });
-  const [marker, setMarker] = useState({ latitude: region.latitude, longitude: region.longitude });
-  const [coordsLabel, setCoordsLabel] = useState(`${region.latitude.toFixed(6)}, ${region.longitude.toFixed(6)}`);
-  const [meterNumber, setMeterNumber] = useState('');
-  const [showSourceModal, setShowSourceModal] = useState(false);
-  const [dragMode, setDragMode] = useState(false);
-  const [dragPin, setDragPin] = useState(null); // New separate pin for dragging
-  const [showDragConfirmModal, setShowDragConfirmModal] = useState(false);
-  const [nearestModalVisible, setNearestModalVisible] = useState(false);
-  const [nearestCandidate, setNearestCandidate] = useState(null);
-  const [nearestSuccess, setNearestSuccess] = useState(false);
-  const [searching, setSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState([]);
-  const [showSearchResults, setShowSearchResults] = useState(false);
-  const [currentMeterDetails, setCurrentMeterDetails] = useState(null);
-  // Normalizer: map various API response shapes to a consistent meter object
-  const normalizeMeterResult = (r) => {
-    if (!r) return null;
-    const latitude = r.latitude || r.Latitude || r.lat || r.Lat || r.latitudeString || null;
-    const longitude = r.longitude || r.Longitude || r.lng || r.Long || r.longitudeString || null;
-
-    const parsedLat = latitude !== null && latitude !== undefined && latitude !== '' ? parseFloat(latitude) : null;
-    const parsedLng = longitude !== null && longitude !== undefined && longitude !== '' ? parseFloat(longitude) : null;
-
-    return {
-      // common keys used by the UI
-      meterNumber: r.meterNumber || r.MeterNumber || r.meter_no || r.meterNo || r.meter || r.meter_no_string || '',
-      accountNumber: r.accountNumber || r.AccountNumber || r.accountNo || r.account_number || r.account || r.account_no_string || '',
-      address: r.address || r.Address || r.fullAddress || r.customerAddress || r.location || r.address_line || '',
-      latitude: parsedLat,
-      longitude: parsedLng,
-      // keep original payload for debugging or future fields
-      _raw: r,
-    };
-  };
-  const cycleTiles = () => setTileIndex((prev) => (prev + 1) % TILE_SOURCES.length);
+  const cycleTiles = () => store.cycleTiles();
 
   useEffect(() => {
     (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({});
-        const nextRegion = {
-          latitude: loc.coords.latitude,
-          longitude: loc.coords.longitude,
-          latitudeDelta: 0.02,
-          longitudeDelta: 0.02,
-        };
-        setRegion(nextRegion);
-        setMarker({ latitude: nextRegion.latitude, longitude: nextRegion.longitude });
-        setCoordsLabel(`${nextRegion.latitude.toFixed(6)}, ${nextRegion.longitude.toFixed(6)}`);
+      const nextRegion = await store.initializeLocation();
+      if (nextRegion) {
         mapRef.current?.animateToRegion(nextRegion, 800);
       }
     })();
@@ -84,112 +33,40 @@ export default function ReportScreen({ navigation, route }) {
     const incoming = route?.params?.searchResult;
     const incomingMeter = route?.params?.meterNumber;
     if (incoming) {
-      const arr = Array.isArray(incoming) ? incoming : [incoming];
-      const normalized = arr.map(normalizeMeterResult);
-      setSearchResults(normalized);
-      setShowSearchResults(true);
-
-      // Center map on first result if it has coordinates
-      const first = normalized[0];
+      const first = store.handleIncomingSearchResult(incoming, incomingMeter);
       if (first?.latitude && first?.longitude) {
         const nextRegion = { latitude: first.latitude, longitude: first.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 };
-        setRegion(nextRegion);
-        setMarker({ latitude: nextRegion.latitude, longitude: nextRegion.longitude });
-        setCoordsLabel(`${nextRegion.latitude.toFixed(6)}, ${nextRegion.longitude.toFixed(6)}`);
         mapRef.current?.animateToRegion(nextRegion, 800);
       }
-
-      // Prefill search input
-      setMeterNumber(incomingMeter || first?.meterNumber || first?.accountNumber || '');
-
-      // Clear params to avoid reprocessing on back/forward
       try { navigation.setParams({ searchResult: null, meterNumber: null }); } catch (e) { /* noop */ }
     }
   }, [route?.params]);
 
   const handleMapPress = (e) => {
-    // Don't update marker when in drag mode - let the drag pin handle it
-    if (!dragMode) {
+    if (!store.dragMode) {
       const { latitude, longitude } = e.nativeEvent.coordinate;
-      setMarker({ latitude, longitude });
-      setCoordsLabel(`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+      store.updateMarkerAndLabel(latitude, longitude);
     }
   };
 
   const locateMe = async () => {
-    const loc = await Location.getCurrentPositionAsync({});
-    const nextRegion = {
-      latitude: loc.coords.latitude,
-      longitude: loc.coords.longitude,
-      latitudeDelta: 0.02,
-      longitudeDelta: 0.02,
-    };
-    setRegion(nextRegion);
-    setMarker({ latitude: nextRegion.latitude, longitude: nextRegion.longitude });
-    setCoordsLabel(`${nextRegion.latitude.toFixed(6)}, ${nextRegion.longitude.toFixed(6)}`);
-    mapRef.current?.animateToRegion(nextRegion, 800);
+    const nextRegion = await store.locateMe();
+    if (nextRegion) {
+      mapRef.current?.animateToRegion(nextRegion, 800);
+    }
   };
 
   const refresh = () => {
+    const region = store.refresh();
     mapRef.current?.animateToRegion(region, 500);
-    setMarker({ latitude: region.latitude, longitude: region.longitude });
-    setCoordsLabel(`${region.latitude.toFixed(6)}, ${region.longitude.toFixed(6)}`);
   };
 
   const searchMeter = async () => {
-    if (!meterNumber || meterNumber.trim() === '') {
-      Alert.alert('Search Error', 'Please enter a meter number or account number to search.');
-      return;
-    }
-
-    setSearching(true);
-    setSearchResults([]);
-    
-    try {
-        const response = await searchAccountOrMeter(meterNumber.trim());
-        const data = response?.data || response?.data?.data || response;
-        const results = Array.isArray(data) ? data : data ? [data] : [];
-        if (results.length > 0) {
-          // Normalize results for consistent UI usage
-          const normalized = results.map(normalizeMeterResult);
-          setSearchResults(normalized);
-          setShowSearchResults(true);
-        } else {
-          Alert.alert('No Results', 'No meter or account found matching your search.');
-        }
-    } catch (error) {
-      // Friendlier message for "no results found" (API returns 404 with message)
-      if (error.response?.data?.statusCode === 404 && error.response?.data?.message === 'No matching customer found.') {
-        Alert.alert('No Results', 'No meter or account found matching your search.');
-      } else {
-        console.error('Search error:', error);
-        console.error('Error details:', {
-          status: error.response?.status,
-          data: error.response?.data,
-          url: error.config?.url,
-          baseURL: error.config?.baseURL,
-          fullURL: error.config?.baseURL + error.config?.url
-        });
-        let errorMessage = 'Failed to search meter. Please try again.';
-        if (error.response?.status === 404) {
-          errorMessage = 'Search endpoint not found. The API may have changed or is unavailable.';
-        } else if (error.response?.data?.message) {
-          errorMessage = error.response.data.message;
-        }
-        Alert.alert('Search Failed', errorMessage + '\n\nURL: ' + (error.config?.baseURL || '') + (error.config?.url || ''));
-      }
-    } finally {
-      setSearching(false);
-    }
+    await store.searchMeter();
   };
 
   const selectSearchResult = (result) => {
-    // Close search results modal
-    setShowSearchResults(false);
-    // Ensure normalized shape (in case searchResults were not normalized)
-    const normalized = normalizeMeterResult(result);
-
-    // If result has coordinates, move map to that location
+    const normalized = store.selectSearchResult(result);
     if (normalized?.latitude && normalized?.longitude) {
       const nextRegion = {
         latitude: normalized.latitude,
@@ -197,57 +74,25 @@ export default function ReportScreen({ navigation, route }) {
         latitudeDelta: 0.01,
         longitudeDelta: 0.01,
       };
-      setRegion(nextRegion);
-      setMarker({ latitude: nextRegion.latitude, longitude: nextRegion.longitude });
-      setCoordsLabel(`${nextRegion.latitude.toFixed(6)}, ${nextRegion.longitude.toFixed(6)}`);
       mapRef.current?.animateToRegion(nextRegion, 800);
     }
-
-    // Update meter number and store normalized details
-    setMeterNumber(normalized?.meterNumber || normalized?.accountNumber || '');
-    setCurrentMeterDetails(normalized);
-
-    Alert.alert('Meter Found', `Account: ${normalized?.accountNumber || 'N/A'}\nMeter: ${normalized?.meterNumber || 'N/A'}\nAddress: ${normalized?.address || 'N/A'}`);
   };
 
   const reportLeak = () => {
-    // Show modal to select meter source (current / nearest / drag)
-    setShowSourceModal(true);
-  };
-
-  // Mock meters (in real app, query server or local DB)
-  const MOCK_METERS = [
-    { id: 'M-1001', latitude: region.latitude + 0.0008, longitude: region.longitude + 0.0003 },
-    { id: 'M-1002', latitude: region.latitude - 0.0004, longitude: region.longitude + 0.0006 },
-    { id: 'M-1003', latitude: region.latitude + 0.0001, longitude: region.longitude - 0.0009 },
-  ];
-
-  const toRad = (deg) => (deg * Math.PI) / 180;
-  const haversine = (a, b) => {
-    const R = 6371e3; // meters
-    const phi1 = toRad(a.latitude);
-    const phi2 = toRad(b.latitude);
-    const dPhi = toRad(b.latitude - a.latitude);
-    const dLambda = toRad(b.longitude - a.longitude);
-    const sinDphi = Math.sin(dPhi / 2) * Math.sin(dPhi / 2);
-    const sinDlambda = Math.sin(dLambda / 2) * Math.sin(dLambda / 2);
-    const c = 2 * Math.atan2(Math.sqrt(sinDphi + Math.cos(phi1) * Math.cos(phi2) * sinDlambda), Math.sqrt(1 - (sinDphi + Math.cos(phi1) * Math.cos(phi2) * sinDlambda)));
-    return R * c;
+    store.setShowSourceModal(true);
   };
 
   const handleUseCurrentPinpoint = () => {
-    setShowSourceModal(false);
-    setDragMode(false);
-    // Use dragPin if it exists (after drag mode), otherwise use marker
-    const selectedCoordinates = dragPin || marker;
-    setDragPin(null);
-    // Navigate to the form with meter data and coordinates
-    const normalized = currentMeterDetails || null;
+    store.setShowSourceModal(false);
+    store.setDragMode(false);
+    const selectedCoordinates = store.dragPin || store.marker;
+    store.setDragPin(null);
+    
+    const normalized = store.currentMeterDetails || null;
     const meterData = normalized && (normalized.meterNumber || normalized.accountNumber)
       ? { meterNumber: normalized.meterNumber || '', accountNumber: normalized.accountNumber || '', address: normalized.address || '' }
-      : { meterNumber: meterNumber || '', accountNumber: '', address: '' };
+      : { meterNumber: store.meterNumber || '', accountNumber: '', address: '' };
 
-    // Ensure coordinates are numeric lat/lng
     const coords = {
       latitude: selectedCoordinates?.latitude,
       longitude: selectedCoordinates?.longitude,
@@ -260,88 +105,34 @@ export default function ReportScreen({ navigation, route }) {
   };
 
   const handleNearestMeter = async () => {
-    // Close the source modal and go back to ReportHome so the home screen can handle nearest-meter flow
-    setShowSourceModal(false);
-    setDragMode(false);
-    setDragPin(null);
+    store.setShowSourceModal(false);
+    store.setDragMode(false);
+    store.setDragPin(null);
     try {
-      navigation.navigate('ReportHome', { nearestRequest: true, coordinates: marker });
+      navigation.navigate('ReportHome', { nearestRequest: true, coordinates: store.marker });
     } catch (err) {
-      // Fallback: go back to previous screen
       navigation.goBack();
     }
   };
 
   const confirmUseNearest = () => {
-    if (!nearestCandidate) return;
-    const next = { latitude: nearestCandidate.latitude, longitude: nearestCandidate.longitude };
-    setMarker(next);
-    setCoordsLabel(`${next.latitude.toFixed(6)}, ${next.longitude.toFixed(6)}`);
-    mapRef.current?.animateToRegion({ ...next, latitudeDelta: 0.005, longitudeDelta: 0.005 }, 600);
-    // Show success state inside the modal instead of a native alert
-    setNearestSuccess(true);
-    // Store selected nearest candidate as current meter details
-    setCurrentMeterDetails(normalizeMeterResult({
-      meterNumber: nearestCandidate.id || nearestCandidate.meterNumber || '',
-      accountNumber: nearestCandidate.accountNumber || '',
-      address: nearestCandidate.address || '',
-      latitude: nearestCandidate.latitude,
-      longitude: nearestCandidate.longitude,
-      // include raw id
-      id: nearestCandidate.id,
-    }));
+    const nextRegion = store.confirmUseNearest();
+    if (nextRegion) {
+      mapRef.current?.animateToRegion(nextRegion, 600);
+    }
   };
 
   const cancelNearestModal = () => {
-    // simply close and clear candidate, optionally reset map view
-    setNearestModalVisible(false);
-    setNearestCandidate(null);
-    setNearestSuccess(false);
-    // animate back to previous region
+    const region = store.cancelNearestModal();
     mapRef.current?.animateToRegion(region, 400);
   };
 
   const closeNearestSuccess = () => {
-    // Close modal and clear state after user taps OK on success
-    setNearestModalVisible(false);
-    setNearestCandidate(null);
-    setNearestSuccess(false);
-  };
-
-  const handleDragPinOnMap = () => {
-    // Show a nicer confirmation modal before entering drag mode
-    setShowSourceModal(false);
-    setShowDragConfirmModal(true);
-  };
-
-  const startDragFromModal = () => {
-    // Start drag mode and place a draggable blue pin slightly offset so red current-location remains visible
-    setDragMode(true);
-    setDragPin({
-      latitude: region.latitude + 0.001,
-      longitude: region.longitude + 0.001,
-    });
-    setShowDragConfirmModal(false);
+    store.closeNearestSuccess();
   };
 
   const cancelDragModal = () => {
-    setShowDragConfirmModal(false);
-  };
-
-  const confirmDraggedLocation = () => {
-    if (dragPin) {
-      // Update coordinates label to show the dragged pin location
-      setCoordsLabel(`${dragPin.latitude.toFixed(6)}, ${dragPin.longitude.toFixed(6)}`);
-      setDragMode(false);
-      // Keep dragPin visible (don't set to null)
-      // Red pin (marker) stays at current location, blue pin stays where dragged
-      Alert.alert('Location Confirmed', 'You can now proceed to report the leak.');
-    }
-  };
-
-  const cancelDragMode = () => {
-    setDragMode(false);
-    setDragPin(null);
+    store.setShowDragConfirmModal(false);
   };
 
   return (
@@ -379,19 +170,19 @@ export default function ReportScreen({ navigation, route }) {
             style={styles.searchInput}
             placeholder="Enter meter number..."
             placeholderTextColor="#9aa5b1"
-            value={meterNumber}
-            onChangeText={setMeterNumber}
+            value={store.meterNumber}
+            onChangeText={store.setMeterNumber}
             onSubmitEditing={searchMeter}
             returnKeyType="search"
-            editable={!searching}
+            editable={!store.searching}
           />
         </View>
         <TouchableOpacity 
-          style={[styles.searchBtn, searching && styles.searchBtnDisabled]} 
+          style={[styles.searchBtn, store.searching && styles.searchBtnDisabled]} 
           onPress={searchMeter}
-          disabled={searching}
+          disabled={store.searching}
         >
-          {searching ? (
+          {store.searching ? (
             <ActivityIndicator size="small" color="#fff" />
           ) : (
             <Text style={styles.searchBtnText}>Search</Text>
@@ -404,13 +195,13 @@ export default function ReportScreen({ navigation, route }) {
         <MapView
           ref={mapRef}
           style={StyleSheet.absoluteFill}
-          initialRegion={region}
+          initialRegion={store.region}
           onPress={handleMapPress}
           mapType="none"
           showsUserLocation
         >
           <UrlTile
-            urlTemplate={TILE_SOURCES[tileIndex].url}
+            urlTemplate={TILE_SOURCES[store.tileIndex].url}
             maximumZ={19}
             tileSize={256}
             zIndex={0}
@@ -419,39 +210,39 @@ export default function ReportScreen({ navigation, route }) {
           {/* Current location marker */}
           <Marker
             key="current-location"
-            coordinate={marker}
+            coordinate={store.marker}
             pinColor="red"
             title="Current Location"
-            description={`Lat: ${marker.latitude.toFixed(4)}, Lon: ${marker.longitude.toFixed(4)}`}
+            description={`Lat: ${store.marker.latitude.toFixed(4)}, Lon: ${store.marker.longitude.toFixed(4)}`}
           />
 
           {/* Draggable/Confirmed pin (blue, visible in drag mode and after confirmation) */}
-          {dragPin && (
+          {store.dragPin && (
             <>
               {/* Line connecting red and blue pin */}
               <Polyline
-                coordinates={[marker, dragPin]}
+                coordinates={[store.marker, store.dragPin]}
                 strokeColor="rgba(59, 130, 246, 0.7)" // semi-transparent blue
                 strokeWidth={6}
                 lineDashPattern={[10, 8]} // dashed line
               />
               <Marker
                 key="drag-pin"
-                coordinate={dragPin}
-                draggable={dragMode}
+                coordinate={store.dragPin}
+                draggable={store.dragMode}
                 pinColor="#3b82f6"
-                title={dragMode ? 'Drag to set location' : 'Selected Location'}
-                description={`Lat: ${dragPin.latitude.toFixed(4)}, Lon: ${dragPin.longitude.toFixed(4)}`}
+                title={store.dragMode ? 'Drag to set location' : 'Selected Location'}
+                description={`Lat: ${store.dragPin.latitude.toFixed(4)}, Lon: ${store.dragPin.longitude.toFixed(4)}`}
                 onDragEnd={(e) => {
                   const { latitude, longitude } = e.nativeEvent.coordinate;
-                  setDragPin({ latitude, longitude });
-                  setDragMode(false);
-                  setCoordsLabel(`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+                  store.setDragPin({ latitude, longitude });
+                  store.setDragMode(false);
+                  store.setCoordsLabel(`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
                   Alert.alert('Location Confirmed', 'You can now proceed to report the leak.');
                 }}
                 onDrag={(e) => {
                   const { latitude, longitude } = e.nativeEvent.coordinate;
-                  setDragPin({ latitude, longitude });
+                  store.setDragPin({ latitude, longitude });
                 }}
               />
             </>
@@ -459,7 +250,7 @@ export default function ReportScreen({ navigation, route }) {
         </MapView>
 
         {/* Source selection modal */}
-        <Modal visible={showSourceModal} animationType="fade" transparent onRequestClose={() => setShowSourceModal(false)}>
+  <Modal visible={store.showSourceModal} animationType="fade" transparent onRequestClose={() => store.setShowSourceModal(false)}>
           <View style={styles.modalOverlay}>
             <View style={[styles.modalCard, { paddingBottom: 24 + insets.bottom }]}>
               <Text style={styles.modalTitle}>Select Meter Source</Text>
@@ -498,7 +289,7 @@ export default function ReportScreen({ navigation, route }) {
                 <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.modalCancel} onPress={() => setShowSourceModal(false)} activeOpacity={0.8}>
+              <TouchableOpacity style={styles.modalCancel} onPress={() => store.setShowSourceModal(false)} activeOpacity={0.8}>
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
             </View>
@@ -506,17 +297,17 @@ export default function ReportScreen({ navigation, route }) {
         </Modal>
 
         {/* Nearest Meter Confirmation Modal */}
-        <Modal visible={nearestModalVisible} animationType="fade" transparent onRequestClose={cancelNearestModal}>
+  <Modal visible={store.nearestModalVisible} animationType="fade" transparent onRequestClose={cancelNearestModal}>
           {/* Use centered overlay when showing success for a cleaner look */}
-          <View style={nearestSuccess ? [styles.modalOverlay, { justifyContent: 'center' }] : styles.modalOverlay}>
-            <View style={[ nearestSuccess ? styles.centeredModalCard : styles.modalCard, { padding: 20, paddingBottom: 20 + insets.bottom }]}>              
-              {!nearestSuccess ? (
+          <View style={store.nearestSuccess ? [styles.modalOverlay, { justifyContent: 'center' }] : styles.modalOverlay}>
+            <View style={[ store.nearestSuccess ? styles.centeredModalCard : styles.modalCard, { padding: 20, paddingBottom: 20 + insets.bottom }]}>              
+              {!store.nearestSuccess ? (
                 <>
                   <Text style={styles.modalTitle}>Nearest Meter Found</Text>
-                  {nearestCandidate ? (
+                  {store.nearestCandidate ? (
                     <View style={{ alignItems: 'center', marginBottom: 12 }}>
-                      <Text style={{ fontSize: 16, fontWeight: '700' }}>{nearestCandidate.id}</Text>
-                      <Text style={{ color: '#6b7280', marginTop: 6 }}>Approximately {nearestCandidate.distance} m away</Text>
+                      <Text style={{ fontSize: 16, fontWeight: '700' }}>{store.nearestCandidate.id}</Text>
+                      <Text style={{ color: '#6b7280', marginTop: 6 }}>Approximately {store.nearestCandidate.distance} m away</Text>
                     </View>
                   ) : null}
 
@@ -540,8 +331,8 @@ export default function ReportScreen({ navigation, route }) {
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.simpleSuccessTitle}>Nearest meter selected</Text>
-                      {nearestCandidate ? (
-                        <Text style={styles.simpleSuccessText}>Meter {nearestCandidate.id} selected ({nearestCandidate.distance} m)</Text>
+                      {store.nearestCandidate ? (
+                        <Text style={styles.simpleSuccessText}>Meter {store.nearestCandidate.id} selected ({store.nearestCandidate.distance} m)</Text>
                       ) : null}
                     </View>
                   </View>
@@ -558,7 +349,7 @@ export default function ReportScreen({ navigation, route }) {
         </Modal>
 
         {/* Drag Confirmation Modal */}
-        <Modal visible={showDragConfirmModal} animationType="slide" transparent onRequestClose={() => setShowDragConfirmModal(false)}>
+  <Modal visible={store.showDragConfirmModal} animationType="slide" transparent onRequestClose={() => store.setShowDragConfirmModal(false)}>
           <View style={styles.modalOverlay}>
             <View style={[styles.modalCard, { alignItems: 'center', paddingBottom: 48 + insets.bottom }]}>
               <View style={{ marginBottom: 8 }}>
@@ -588,7 +379,7 @@ export default function ReportScreen({ navigation, route }) {
         </Modal>
 
         {/* Search Results Modal */}
-        <Modal visible={showSearchResults} animationType="slide" transparent onRequestClose={() => setShowSearchResults(false)}>
+  <Modal visible={store.showSearchResults} animationType="slide" transparent onRequestClose={() => store.setShowSearchResults(false)}>
           <View style={styles.modalOverlay}>
             <View style={[styles.modalCard, { maxHeight: '70%', paddingBottom: 20 + insets.bottom }]}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -599,7 +390,7 @@ export default function ReportScreen({ navigation, route }) {
               </View>
               
               <ScrollView showsVerticalScrollIndicator={false}>
-                {searchResults.map((result, index) => (
+                {store.searchResults.map((result, index) => (
                   <TouchableOpacity 
                     key={index} 
                     style={styles.searchResultItem}
@@ -642,7 +433,7 @@ export default function ReportScreen({ navigation, route }) {
         </View>
 
         {/* Drag Mode Action Buttons */}
-        {dragMode && dragPin && (
+        {store.dragMode && store.dragPin && (
           <View style={styles.dragModeActions}>
             <TouchableOpacity style={styles.cancelDragBtn} onPress={cancelDragMode}>
               <Ionicons name="close-circle" size={20} color="#ef4444" />
@@ -658,30 +449,30 @@ export default function ReportScreen({ navigation, route }) {
         {/* Tile Source Badge (top right) */}
         <View style={styles.tileSourceBadge}>
           <Ionicons name="map-outline" size={14} color="#1e5a8e" style={{ marginRight: 4 }} />
-          <Text style={styles.tileSourceText}>{TILE_SOURCES[tileIndex].name}</Text>
+          <Text style={styles.tileSourceText}>{TILE_SOURCES[store.tileIndex].name}</Text>
         </View>
 
         {/* Coordinate pill */}
         <View style={styles.coordPill}>
           <Ionicons name="location" size={14} color="#fff" style={{ marginRight: 6 }} />
-          <Text style={styles.coordText}>{coordsLabel}</Text>
+          <Text style={styles.coordText}>{store.coordsLabel}</Text>
         </View>
 
         {/* Attribution */}
         <View style={styles.attribution}>
-          <Text style={styles.attrText}>{TILE_SOURCES[tileIndex].attribution}</Text>
+          <Text style={styles.attrText}>{TILE_SOURCES[store.tileIndex].attribution}</Text>
         </View>
       </View>
 
       {/* Meter Details Card */}
       <View style={styles.detailsCard}>
-        <Text style={styles.detailsTitle}>Meter Details</Text>
+  <Text style={styles.detailsTitle}>Meter Details</Text>
 
         <View style={styles.detailRow}>
           <Ionicons name="speedometer-outline" size={18} color="#1e3a5f" style={styles.detailIcon} />
           <View style={{ flex: 1 }}>
             <Text style={styles.detailLabel}>Meter Number</Text>
-            <Text style={styles.detailValue}>{currentMeterDetails?.meterNumber || meterNumber || 'N/A'}</Text>
+            <Text style={styles.detailValue}>{store.currentMeterDetails?.meterNumber || store.meterNumber || 'N/A'}</Text>
           </View>
         </View>
 
@@ -689,7 +480,7 @@ export default function ReportScreen({ navigation, route }) {
           <Ionicons name="document-text-outline" size={18} color="#1e3a5f" style={styles.detailIcon} />
           <View style={{ flex: 1 }}>
             <Text style={styles.detailLabel}>Account Number</Text>
-            <Text style={styles.detailValue}>{currentMeterDetails?.accountNumber || 'N/A'}</Text>
+            <Text style={styles.detailValue}>{store.currentMeterDetails?.accountNumber || 'N/A'}</Text>
           </View>
         </View>
 
@@ -697,7 +488,7 @@ export default function ReportScreen({ navigation, route }) {
           <Ionicons name="location-outline" size={18} color="#1e3a5f" style={styles.detailIcon} />
           <View style={{ flex: 1 }}>
             <Text style={styles.detailLabel}>Address</Text>
-            <Text style={styles.detailValue}>{currentMeterDetails?.address || 'N/A'}</Text>
+            <Text style={styles.detailValue}>{store.currentMeterDetails?.address || 'N/A'}</Text>
           </View>
         </View>
 
@@ -708,7 +499,7 @@ export default function ReportScreen({ navigation, route }) {
       </ScrollView>
     </SafeAreaView>
   );
-}
+});
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#f0f4f8' },
@@ -1304,3 +1095,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default ReportScreen;

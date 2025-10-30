@@ -3,6 +3,10 @@ import AuthStore from './AuthStore';
 import DashboardStore from './DashboardStore';
 import DownloadStore from './DownloadStore';
 import LocationStore from './LocationStore';
+import LeakReportStore from './LeakReportStore';
+import NearestMetersStore from './NearestMetersStore';
+import { ReportMapStore } from './ReportMapStore';
+import { SettingsStore } from './SettingsStore';
 
 class RootStore {
   constructor() {
@@ -10,6 +14,10 @@ class RootStore {
     this.dashboardStore = new DashboardStore();
     this.downloadStore = new DownloadStore();
     this.locationStore = new LocationStore();
+    this.leakReportStore = new LeakReportStore();
+    this.nearestMetersStore = new NearestMetersStore();
+    this.reportMapStore = new ReportMapStore();
+    this.settingsStore = new SettingsStore();
   }
 
   reset() {
@@ -17,6 +25,10 @@ class RootStore {
     this.dashboardStore.reset();
     this.downloadStore.reset();
     this.locationStore.reset();
+    this.leakReportStore.reset();
+    this.nearestMetersStore.reset();
+    this.reportMapStore.reset();
+    this.settingsStore.reset();
   }
 }
 
@@ -40,6 +52,10 @@ export const useAuthStore = () => useStores().authStore;
 export const useDashboardStore = () => useStores().dashboardStore;
 export const useDownloadStore = () => useStores().downloadStore;
 export const useLocationStore = () => useStores().locationStore;
+export const useLeakReportStore = () => useStores().leakReportStore;
+export const useNearestMetersStore = () => useStores().nearestMetersStore;
+export const useReportMapStore = () => useStores().reportMapStore;
+export const useSettingsStore = () => useStores().settingsStore;
 
 export { StoreContext, rootStore };
 export default RootStore;

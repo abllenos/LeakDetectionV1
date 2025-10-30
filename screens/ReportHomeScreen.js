@@ -1,30 +1,24 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, StatusBar, Alert } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import MapView, { UrlTile } from 'react-native-maps';
-import { searchAccountOrMeter } from '../services/interceptor';
-import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
+import { observer } from 'mobx-react-lite';
+import { useReportMapStore } from '../stores/RootStore';
 
-export default function ReportHomeScreen({ navigation, route }) {
+const ReportHomeScreen = observer(({ navigation, route }) => {
+  const store = useReportMapStore();
+  const mapRef = useRef(null);
+  
   const TILE_SOURCES = [
     { name: 'OSM DE', url: 'https://tile.openstreetmap.de/{z}/{x}/{y}.png', attribution: '© OpenStreetMap contributors' },
   ];
 
-  const [tileIndex] = useState(0);
-  const mapRef = useRef(null);
-  const [region, setRegion] = useState({ latitude: 7.0731, longitude: 125.6129, latitudeDelta: 0.05, longitudeDelta: 0.05 });
-  const [meterNumber, setMeterNumber] = useState('');
-  const [searching, setSearching] = useState(false);
-
   useEffect(() => {
     (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({});
-        const nextRegion = { latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.02, longitudeDelta: 0.02 };
-        setRegion(nextRegion);
+      const nextRegion = await store.initializeLocation();
+      if (nextRegion) {
         mapRef.current?.animateToRegion(nextRegion, 600);
       }
     })();
@@ -34,15 +28,10 @@ export default function ReportHomeScreen({ navigation, route }) {
   useEffect(() => {
     const sel = route?.params?.selectedMeter;
     if (sel) {
-      // Prefill the input
-      setMeterNumber(sel.meterNumber || '');
-      // Center map to the selected meter coordinates if provided
-      if (sel.latitude && sel.longitude) {
-        const nextRegion = { latitude: sel.latitude, longitude: sel.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 };
-        setRegion(nextRegion);
+      const nextRegion = store.handleSelectedMeter(sel);
+      if (nextRegion) {
         mapRef.current?.animateToRegion(nextRegion, 600);
       }
-      // Clear the param so repeated navigations don't reapply
       navigation.setParams({ selectedMeter: null });
     }
   }, [route?.params]);
@@ -60,25 +49,14 @@ export default function ReportHomeScreen({ navigation, route }) {
   }, [route?.params]);
 
   const searchMeter = async () => {
-    if (!meterNumber || meterNumber.trim() === '') {
-      // Navigate to report map for general reporting
-      navigation.navigate('ReportMap', { meterNumber });
+    if (!store.meterNumber || store.meterNumber.trim() === '') {
+      navigation.navigate('ReportMap', { meterNumber: store.meterNumber });
       return;
     }
-    setSearching(true);
-    try {
-      const resp = await searchAccountOrMeter(meterNumber.trim());
-      const result = resp?.data || resp?.data?.data || resp;
-      if (!result || (Array.isArray(result) && result.length === 0)) {
-        Alert.alert('No results', 'No meter or account found for that query.');
-      }
-      // Pass API result to ReportMap for display/selection
-      navigation.navigate('ReportMap', { meterNumber: meterNumber.trim(), searchResult: result });
-    } catch (err) {
-      console.warn('search api error', err);
-      Alert.alert('Search failed', 'Unable to search at this time.');
-    } finally {
-      setSearching(false);
+    
+    const result = await store.searchMeter();
+    if (result) {
+      navigation.navigate('ReportMap', { meterNumber: store.meterNumber, searchResult: result });
     }
   };
 
@@ -100,8 +78,8 @@ export default function ReportHomeScreen({ navigation, route }) {
       </LinearGradient>
 
       <View style={styles.mapWrap}>
-        <MapView ref={mapRef} style={styles.map} initialRegion={region} showsUserLocation>
-          <UrlTile urlTemplate={TILE_SOURCES[tileIndex].url} maximumZ={19} tileSize={256} zIndex={0} />
+        <MapView ref={mapRef} style={styles.map} initialRegion={store.region} showsUserLocation>
+          <UrlTile urlTemplate={TILE_SOURCES[store.tileIndex].url} maximumZ={19} tileSize={256} zIndex={0} />
         </MapView>
 
         <View style={styles.searchOverlay}>
@@ -111,19 +89,19 @@ export default function ReportHomeScreen({ navigation, route }) {
               style={styles.searchInput}
               placeholder="Enter meter number..."
               placeholderTextColor="#9aa5b1"
-              value={meterNumber}
-              onChangeText={setMeterNumber}
+              value={store.meterNumber}
+              onChangeText={store.setMeterNumber}
               returnKeyType="search"
               onSubmitEditing={searchMeter}
-              editable={!searching}
+              editable={!store.searching}
             />
           </View>
           <TouchableOpacity 
-            style={[styles.searchBtn, searching && styles.searchBtnDisabled]} 
+            style={[styles.searchBtn, store.searching && styles.searchBtnDisabled]} 
             onPress={searchMeter} 
-            disabled={searching}
+            disabled={store.searching}
           >
-            {searching ? (
+            {store.searching ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
               <Text style={styles.searchBtnText}>Search</Text>
@@ -144,7 +122,9 @@ export default function ReportHomeScreen({ navigation, route }) {
       </View>
     </SafeAreaView>
   );
-}
+});
+
+export default ReportHomeScreen;
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#f0f4f8' },
