@@ -420,41 +420,28 @@ export const submitLeakReport = async (reportData) => {
     // Use FormData (multipart/form-data) as backend expects
     const formData = new FormData();
     
-    // String fields
-    formData.append('ReportedLocation', mappedData.ReportedLocation || '');
-    formData.append('ReportedLandmark', mappedData.ReportedLandmark || '');
-    formData.append('ReporterName', mappedData.ReporterName || '');
-    
-    // Try geometry in multiple formats and field names
-    formData.append('geom', geomString || ''); // Comma-separated
-    formData.append('Geom', geomString || '');
-    formData.append('geometry', wktPoint || ''); // WKT format
-    formData.append('Geometry', wktPoint || '');
-    formData.append('GeomWkt', wktPoint || ''); // Explicit WKT field
-    formData.append('Latitude', latitude.toString());
-    formData.append('Longitude', longitude.toString());
-    
-    formData.append('RefNo', mappedData.RefNo || '');
-    formData.append('ReferenceMtr', mappedData.ReferenceMtr || '');
-    formData.append('ReportedNumber', mappedData.ReportedNumber || '');
-    formData.append('ReferenceRecaddrs', mappedData.ReferenceRecaddrs || '');
-    formData.append('DmaCode', mappedData.DmaCode || '');
-    formData.append('JmsCode', mappedData.JmsCode || '');
-    formData.append('empId', mappedData.empId || '');  // IMPORTANT: lowercase 'empId'
-    formData.append('ReportedBy', mappedData.ReportedBy || '');  // NEW: ReportedBy field
-    console.log('🆔 Appending empId and ReportedBy to FormData:', mappedData.empId);
-    formData.append('DtReported', mappedData.DtReported || '');
-    formData.append('DtReceived', mappedData.DtReceived || '');
-    
-    // Integer fields (send as numbers, not strings!)
-    formData.append('LeakTypeId', mappedData.LeakTypeId || 0);
-    formData.append('LeakCovering', mappedData.LeakCovering || 0);
-    formData.append('Priority', mappedData.Priority || 0);
-    formData.append('ReportType', mappedData.ReportType || 0);
-    formData.append('DispatchStat', mappedData.DispatchStat || 0);
-    formData.append('LeakIndicator', mappedData.LeakIndicator || 0);
-    formData.append('LeakLocation', mappedData.LeakLocation || 0);
-    formData.append('ReporterType', mappedData.ReporterType || 0);
+    // String fields - use camelCase to match backend model
+  formData.append('ReportedLocation', mappedData.ReportedLocation || '');
+  formData.append('ReportedLandmark', mappedData.ReportedLandmark || '');
+  formData.append('ReporterName', mappedData.ReporterName || '');
+  formData.append('Geom', geomString || '');
+  formData.append('RefNo', mappedData.RefNo || '');
+  formData.append('ReferenceMtr', mappedData.ReferenceMtr || '');
+  formData.append('ReportedNumber', mappedData.ReportedNumber || '');
+  formData.append('ReferenceRecaddrs', mappedData.ReferenceRecaddrs || '');
+  formData.append('DmaCode', mappedData.DmaCode || '');
+  formData.append('JmsCode', mappedData.JmsCode || '');
+  formData.append('ReportedBy', mappedData.ReportedBy || '');
+  formData.append('DtReported', mappedData.DtReported || '');
+  formData.append('DtReceived', mappedData.DtReceived || '');
+  formData.append('LeakTypeId', mappedData.LeakTypeId || 0);
+  formData.append('LeakCovering', mappedData.LeakCovering || 0);
+  formData.append('Priority', mappedData.Priority || 0);
+  formData.append('ReportType', mappedData.ReportType || 0);
+  formData.append('DispatchStat', mappedData.DispatchStat || 0);
+  formData.append('LeakIndicator', mappedData.LeakIndicator || 0);
+  formData.append('LeakLocation', mappedData.LeakLocation || 0);
+  formData.append('ReporterType', mappedData.ReporterType || 0);
     
     // Image files - properly format for React Native FormData
     if (reportData.leakPhotos && reportData.leakPhotos.length > 0) {
@@ -463,7 +450,6 @@ export const submitLeakReport = async (reportData) => {
           const fileName = photoUri.split('/').pop();
           const fileType = fileName.split('.').pop();
           const fieldName = index === 0 ? 'LeakImage1' : 'LeakImage2';
-          
           formData.append(fieldName, {
             uri: photoUri,
             name: fileName || `leak_photo_${index + 1}.jpg`,
@@ -477,7 +463,6 @@ export const submitLeakReport = async (reportData) => {
     if (reportData.landmarkPhoto) {
       const fileName = reportData.landmarkPhoto.split('/').pop();
       const fileType = fileName.split('.').pop();
-      
       formData.append('LandmarkImage', {
         uri: reportData.landmarkPhoto,
         name: fileName || 'landmark_photo.jpg',
@@ -486,7 +471,20 @@ export const submitLeakReport = async (reportData) => {
       console.log('📸 Appended LandmarkImage:', fileName);
     }
     
-    console.log('✅ Appended geom:', mappedData.geom);
+    console.log('✅ FormData prepared with camelCase field names to match backend model');
+    
+    // Log all FormData entries for debugging
+    console.log('📋 FormData contents being sent:');
+    if (formData._parts) {
+      formData._parts.forEach(([key, value]) => {
+        if (typeof value === 'object' && value.uri) {
+          console.log(`  ${key}: [FILE] ${value.name}`);
+        } else {
+          console.log(`  ${key}: ${value}`);
+        }
+      });
+    }
+    
     console.log('📤 Sending FormData to backend (multipart/form-data)');
     
     try {

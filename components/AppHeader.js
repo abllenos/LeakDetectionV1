@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -6,13 +6,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { preCacheCustomers } from '../services/interceptor';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIsFocused } from '@react-navigation/native';
+import { observer } from 'mobx-react-lite';
+import { useDownloadStore } from '../stores/RootStore';
 
-export default function AppHeader({ left, title, subtitle, right, showDownload = true }) {
-  const [downloading, setDownloading] = useState(false);
-  const [progress, setProgress] = useState(null);
-  const [statusMsg, setStatusMsg] = useState('');
+const AppHeader = observer(({ left, title, subtitle, right, showDownload = true }) => {
+  const downloadStore = useDownloadStore();
   const timeoutRef = useRef();
-  const [statusBadge, setStatusBadge] = useState(null);
   const isFocused = useIsFocused?.() ?? true;
 
   // Poll download status while component is mounted/focused
@@ -25,9 +24,9 @@ export default function AppHeader({ left, title, subtitle, right, showDownload =
         if (!mounted) return;
         if (s) {
           const obj = JSON.parse(s);
-          setStatusBadge(obj);
+          downloadStore.setStatusBadge(obj);
         } else {
-          setStatusBadge(null);
+          downloadStore.setStatusBadge(null);
         }
       } catch (e) {
         // ignore
@@ -46,10 +45,8 @@ export default function AppHeader({ left, title, subtitle, right, showDownload =
   }, []);
 
   const startDownload = async () => {
-    if (downloading) return;
-    setDownloading(true);
-    setProgress(0);
-    setStatusMsg('Starting client download...');
+    if (downloadStore.downloading) return;
+    downloadStore.startDownload('Starting client download...');
 
     try {
       // Read preset from storage and map to opts (fallback to fast)
@@ -75,22 +72,19 @@ export default function AppHeader({ left, title, subtitle, right, showDownload =
 
       await preCacheCustomers((p) => {
         if (typeof p === 'number') {
-          setProgress(Math.round(p));
+          downloadStore.updateProgress(Math.round(p));
         } else if (p && typeof p === 'object') {
-          if (p.percent != null) setProgress(Math.round(p.percent));
-          else if (p.done != null && p.total != null) setProgress(Math.round((p.done / p.total) * 100));
+          if (p.percent != null) downloadStore.updateProgress(Math.round(p.percent));
+          else if (p.done != null && p.total != null) downloadStore.updateProgress(Math.round((p.done / p.total) * 100));
         }
       }, opts);
 
-      setStatusMsg('Client data ready');
-      setProgress(100);
-      timeoutRef.current = setTimeout(() => setStatusMsg(''), 3000);
+      downloadStore.completeDownload('Client data ready');
+      timeoutRef.current = setTimeout(() => downloadStore.clearStatusMsg(), 3000);
     } catch (err) {
       console.warn('Background download failed', err);
-      setStatusMsg('Client download failed');
-      timeoutRef.current = setTimeout(() => setStatusMsg(''), 4000);
-    } finally {
-      setDownloading(false);
+      downloadStore.failDownload('Client download failed');
+      timeoutRef.current = setTimeout(() => downloadStore.clearStatusMsg(), 4000);
     }
   };
 
@@ -101,16 +95,16 @@ export default function AppHeader({ left, title, subtitle, right, showDownload =
         <View style={styles.center}>
           <Text style={styles.title}>{title}</Text>
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
-          {statusMsg ? <Text style={styles.status}>{statusMsg}{progress != null ? ` (${progress}%)` : ''}</Text> : null}
+          {downloadStore.statusMsg ? <Text style={styles.status}>{downloadStore.statusMsg}{downloadStore.progress != null ? ` (${downloadStore.progress}%)` : ''}</Text> : null}
         </View>
         <View style={styles.right}>
           {right || (
             showDownload ? (
               <TouchableOpacity onPress={startDownload} style={{ padding: 6, flexDirection: 'row', alignItems: 'center' }}>
-                <Ionicons name={downloading ? 'download' : 'download-outline'} size={22} color="#fff" />
-                {statusBadge && typeof statusBadge.percent === 'number' ? (
+                <Ionicons name={downloadStore.downloading ? 'download' : 'download-outline'} size={22} color="#fff" />
+                {downloadStore.statusBadge && typeof downloadStore.statusBadge.percent === 'number' ? (
                   <View style={{ marginLeft: 6, backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 }}>
-                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>{statusBadge.percent}%</Text>
+                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>{downloadStore.statusBadge.percent}%</Text>
                   </View>
                 ) : null}
               </TouchableOpacity>
@@ -122,7 +116,9 @@ export default function AppHeader({ left, title, subtitle, right, showDownload =
       </LinearGradient>
     </SafeAreaView>
   );
-}
+});
+
+export default AppHeader;
 
 const styles = StyleSheet.create({
   header: {

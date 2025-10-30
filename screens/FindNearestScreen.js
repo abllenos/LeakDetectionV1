@@ -1,12 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
+import { observer } from 'mobx-react-lite';
+import { useLocationStore } from '../stores/RootStore';
 
-export default function FindNearestScreen({ navigation }) {
-  const [status, setStatus] = useState('Requesting location permission...');
+const FindNearestScreen = observer(({ navigation }) => {
+  const locationStore = useLocationStore();
 
   useEffect(() => {
     findNearestMeters();
@@ -14,10 +16,11 @@ export default function FindNearestScreen({ navigation }) {
 
   const findNearestMeters = async () => {
     try {
-      setStatus('Requesting location permission...');
+      locationStore.setStatus('Requesting location permission...');
       const { status: permissionStatus } = await Location.requestForegroundPermissionsAsync();
       
       if (permissionStatus !== 'granted') {
+        locationStore.setError('Permission denied');
         Alert.alert(
           'Permission Required',
           'Location permission is required to find nearest meters.',
@@ -26,7 +29,7 @@ export default function FindNearestScreen({ navigation }) {
         return;
       }
 
-      setStatus('Getting your current location...');
+      locationStore.setStatus('Getting your current location...');
       const loc = await Location.getCurrentPositionAsync({ 
         accuracy: Location.Accuracy.Highest 
       });
@@ -36,7 +39,8 @@ export default function FindNearestScreen({ navigation }) {
         longitude: loc.coords.longitude 
       };
 
-      setStatus('Finding nearest meters...');
+      locationStore.setCurrentLocation(coords);
+      locationStore.setStatus('Finding nearest meters...');
       
       // Small delay for better UX
       await new Promise(resolve => setTimeout(resolve, 800));
@@ -46,6 +50,7 @@ export default function FindNearestScreen({ navigation }) {
 
     } catch (err) {
       console.warn('Failed to get location:', err);
+      locationStore.setError('Unable to get current location');
       Alert.alert(
         'Location Error',
         'Unable to get your current location. Please try again.',
@@ -68,7 +73,7 @@ export default function FindNearestScreen({ navigation }) {
           </View>
 
           <Text style={styles.title}>Finding Nearest Meters</Text>
-          <Text style={styles.subtitle}>{status}</Text>
+          <Text style={styles.subtitle}>{locationStore.status}</Text>
 
           <ActivityIndicator 
             size="large" 
@@ -90,7 +95,9 @@ export default function FindNearestScreen({ navigation }) {
       </LinearGradient>
     </SafeAreaView>
   );
-}
+});
+
+export default FindNearestScreen;
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#1e5a8e' },

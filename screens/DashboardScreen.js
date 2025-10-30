@@ -13,66 +13,39 @@ import AppHeader from '../components/AppHeader';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useEffect, useState, useRef } from 'react';
 import { Modal, FlatList, ActivityIndicator } from 'react-native';
-import { fetchNotifications, markAllRead, clearNotifications } from '../services/notifications';
+import { markAllRead, clearNotifications } from '../services/notifications';
 import { startPeriodicDataCheck, stopPeriodicDataCheck } from '../services/dataChecker';
-import { fetchLeakReports } from '../services/interceptor';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { observer } from 'mobx-react-lite';
+import { useDashboardStore } from '../stores/RootStore';
 
-export default function DashboardScreen({ navigation }) {
+const DashboardScreen = observer(({ navigation }) => {
+  const dashboardStore = useDashboardStore();
   const [notifModalVisible, setNotifModalVisible] = useState(false);
-  const [notifications, setNotifications] = useState([]);
-  const [unreadCount, setUnreadCount] = useState(0);
   const dataCheckIntervalRef = useRef(null);
-  
-  // Leak reports state
-  const [leakReportsData, setLeakReportsData] = useState(null);
-  const [loadingReports, setLoadingReports] = useState(true);
-  const [userData, setUserData] = useState({ name: 'User', avatar: 'U' });
-
-  const loadNotifs = async () => {
-    const list = await fetchNotifications();
-    setNotifications(list);
-    setUnreadCount(list.filter((n) => !n.read).length);
-  };
 
   const handleNotificationClick = async (notification) => {
     console.log('Notification clicked:', notification);
+    await dashboardStore.markNotificationAsRead(notification.id);
     
-    try {
-      // Mark this notification as read
-      const STORAGE_KEY = 'app_notifications';
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      const list = raw ? JSON.parse(raw) : [];
-      
-      const updatedList = list.map(n => 
-        n.id === notification.id ? { ...n, read: true } : n
-      );
-      
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedList));
-      
-      // Update local state
-      setNotifications(updatedList);
-      setUnreadCount(updatedList.filter((n) => !n.read).length);
-      
-      // Handle different notification types
-      if (notification.type === 'data_update') {
-        // Close modal and navigate to Settings screen
-        setNotifModalVisible(false);
-        navigation.navigate('Settings');
-      }
-    } catch (error) {
-      console.error('Failed to handle notification click:', error);
+    // Handle different notification types
+    if (notification.type === 'data_update') {
+      setNotifModalVisible(false);
+      navigation.navigate('Settings');
     }
   };
 
   useEffect(() => {
-    loadNotifs();
+    dashboardStore.loadNotifications();
+    dashboardStore.loadUserData();
+    dashboardStore.loadLeakReports();
     
     // Start periodic data checking (every 1 hour)
     dataCheckIntervalRef.current = startPeriodicDataCheck();
 
     const unsubscribe = navigation.addListener('focus', () => {
-      loadNotifs();
+      dashboardStore.loadNotifications();
+      dashboardStore.loadUserData();
+      dashboardStore.loadLeakReports();
     });
     
     return () => {
@@ -82,74 +55,6 @@ export default function DashboardScreen({ navigation }) {
     };
   }, []);
 
-  // Load user data and leak reports
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        // Load user data
-        const userDataStr = await AsyncStorage.getItem('userData');
-        if (userDataStr) {
-          const user = JSON.parse(userDataStr);
-          console.log('👤 User data loaded:', user); // Debug log
-          
-          // Build full name from API fields: fName, mName, lName
-          const firstName = user.fName || user.firstName || '';
-          const middleName = user.mName || user.middleName || '';
-          const lastName = user.lName || user.lastName || '';
-          
-          // Combine names (with middle initial if available)
-          let userName = firstName;
-          if (middleName) {
-            userName += ' ' + middleName[0] + '.';
-          }
-          if (lastName) {
-            userName += ' ' + lastName;
-          }
-          
-          // Fallback to username or 'User' if no name found
-          if (!userName.trim()) {
-            userName = user.username || user.empId || 'User';
-          }
-          
-          setUserData({
-            name: userName.trim(),
-            avatar: firstName ? firstName[0].toUpperCase() : 'U',
-            empId: user.empId || user.employeeId || user.id || user.userId
-          });
-          
-          console.log('✅ Dashboard user set:', { name: userName, empId: user.empId || user.employeeId || user.id });
-          
-          // Load leak reports with empId
-          setLoadingReports(true);
-          const empId = user.empId || user.employeeId || user.id || user.userId;
-          const reportsData = await fetchLeakReports(empId);
-          console.log('📊 Dashboard received reports data:', {
-            totalReports: (reportsData?.reports || []).length,
-            totalCount: reportsData?.totalCount,
-            dispatchedCount: reportsData?.dispatchedCount,
-            firstReportRefNo: reportsData?.reports?.[0]?.refNo
-          });
-          setLeakReportsData(reportsData);
-        } else {
-          console.warn('⚠️ No user data found in storage');
-        }
-      } catch (error) {
-        console.error('Failed to load dashboard data:', error);
-      } finally {
-        setLoadingReports(false);
-      }
-    };
-    
-    loadData();
-    
-    // Reload when screen comes into focus
-    const unsubscribe = navigation.addListener('focus', () => {
-      loadData();
-    });
-    
-    return unsubscribe;
-  }, []);
-
   const statsData = [
     {
       id: 1,
@@ -157,7 +62,7 @@ export default function DashboardScreen({ navigation }) {
       iconFamily: 'MaterialIcons',
       title: 'Total Reports',
       subtitle: 'All leak reports',
-      count: leakReportsData?.totalCount || 0,
+      count: dashboardStore.totalReports,
       color: '#2196F3',
       borderColor: '#2196F3',
     },
@@ -167,7 +72,7 @@ export default function DashboardScreen({ navigation }) {
       iconFamily: 'Ionicons',
       title: 'Repaired',
       subtitle: 'Completed fixes',
-      count: leakReportsData?.repairedCount || 0,
+      count: dashboardStore.repairedCount,
       color: '#9C27B0',
       borderColor: '#9C27B0',
     },
@@ -177,7 +82,7 @@ export default function DashboardScreen({ navigation }) {
       iconFamily: 'Ionicons',
       title: 'After Meter',
       subtitle: 'Post-meter leaks',
-      count: leakReportsData?.afterCount || 0,
+      count: dashboardStore.afterCount,
       color: '#FF9800',
       borderColor: '#FF9800',
     },
@@ -187,11 +92,23 @@ export default function DashboardScreen({ navigation }) {
       iconFamily: 'Ionicons',
       title: 'Not Found',
       subtitle: 'Unlocated leaks',
-      count: leakReportsData?.notFoundCount || 0,
+      count: dashboardStore.notFoundCount,
       color: '#F44336',
       borderColor: '#F44336',
     },
   ];
+
+  // Helper function to get time-based greeting
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) {
+      return 'Good morning';
+    } else if (hour >= 12 && hour < 18) {
+      return 'Good afternoon';
+    } else {
+      return 'Good evening';
+    }
+  };
 
   // Helper function to format time ago
   const getTimeAgo = (dateString) => {
@@ -234,19 +151,17 @@ export default function DashboardScreen({ navigation }) {
   };
 
   // Transform API reports to recent activity format (show latest 5)
-  const recentActivity = (leakReportsData?.reports || [])
-    .slice(0, 5)
-    .map((report, index) => ({
-      id: report.id || index,
-      title: `${report.refNo || 'N/A'}`,
-      location: report.reportedLocation || 'Unknown location',
-      time: getTimeAgo(report.dtReported),
-      iconName: getLeakTypeIcon(report.dispatchStat),
-      iconFamily: 'Ionicons',
-      iconBg: getLeakTypeColor(report.dispatchStat),
-      meterNumber: report.referenceMtr,
-      dispatchStatus: report.dispatchStat
-    }));
+  const recentActivity = dashboardStore.recentReports.map((report, index) => ({
+    id: report.id || index,
+    title: `${report.refNo || 'N/A'}`,
+    location: report.reportedLocation || 'Unknown location',
+    time: getTimeAgo(report.dtReported),
+    iconName: getLeakTypeIcon(report.dispatchStat),
+    iconFamily: 'Ionicons',
+    iconBg: getLeakTypeColor(report.dispatchStat),
+    meterNumber: report.referenceMtr,
+    dispatchStatus: report.dispatchStat
+  }));
 
   const renderIcon = (iconFamily, iconName, size, color) => {
     switch (iconFamily) {
@@ -275,18 +190,18 @@ export default function DashboardScreen({ navigation }) {
             colors={['#fff', '#f0f9ff']}
             style={styles.avatar}
           >
-            <Text style={styles.avatarText}>{userData.avatar}</Text>
+            <Text style={styles.avatarText}>{dashboardStore.userAvatar}</Text>
           </LinearGradient>
           <View>
-            <Text style={styles.welcomeText}>Welcome back,</Text>
-            <Text style={styles.userName}>{userData.name}</Text>
+            <Text style={styles.greeting}>{getGreeting()}</Text>
+            <Text style={styles.userName}>{dashboardStore.userName}</Text>
           </View>
         </View>
         <TouchableOpacity style={styles.notificationButton} onPress={() => { setNotifModalVisible(true); }}>
           <Ionicons name="notifications-outline" size={24} color="#fff" />
-          {unreadCount > 0 ? (
+          {dashboardStore.unreadCount > 0 ? (
             <View style={[styles.notificationBadge, { width: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center' }]}>
-              <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>{unreadCount}</Text>
+              <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>{dashboardStore.unreadCount}</Text>
             </View>
           ) : (
             <View style={styles.notificationBadge} />
@@ -307,7 +222,7 @@ export default function DashboardScreen({ navigation }) {
                 <View>
                   <Text style={styles.notifModalTitle}>Notifications</Text>
                   <Text style={styles.notifModalSubtitle}>
-                    {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up'}
+                    {dashboardStore.unreadCount > 0 ? `${dashboardStore.unreadCount} unread` : 'All caught up'}
                   </Text>
                 </View>
               </View>
@@ -317,17 +232,17 @@ export default function DashboardScreen({ navigation }) {
             </View>
 
             {/* Action Buttons */}
-            {notifications.length > 0 && (
+            {(dashboardStore.notifications || []).length > 0 && (
               <View style={styles.notifActions}>
                 <TouchableOpacity 
-                  onPress={async () => { await markAllRead(); await loadNotifs(); setUnreadCount(0); }}
+                  onPress={async () => { await markAllRead(); await dashboardStore.loadNotifications(); }}
                   style={styles.notifActionBtn}
                 >
                   <Ionicons name="checkmark-done" size={16} color="#1e5a8e" />
                   <Text style={styles.notifActionText}>Mark all read</Text>
                 </TouchableOpacity>
                 <TouchableOpacity 
-                  onPress={async () => { await clearNotifications(); await loadNotifs(); setUnreadCount(0); }}
+                  onPress={async () => { await clearNotifications(); await dashboardStore.loadNotifications(); }}
                   style={[styles.notifActionBtn, { marginLeft: 8 }]}
                 >
                   <Ionicons name="trash-outline" size={16} color="#ef4444" />
@@ -338,7 +253,7 @@ export default function DashboardScreen({ navigation }) {
 
             {/* Notifications List */}
             <FlatList
-              data={notifications}
+              data={dashboardStore.notifications || []}
               keyExtractor={(i) => String(i.id)}
               renderItem={({ item }) => (
                 <TouchableOpacity 
@@ -391,7 +306,7 @@ export default function DashboardScreen({ navigation }) {
                   <Text style={styles.notifEmptySubtitle}>You're all caught up!</Text>
                 </View>
               }
-              contentContainerStyle={notifications.length === 0 ? { flex: 1 } : null}
+              contentContainerStyle={(dashboardStore.notifications || []).length === 0 ? { flex: 1 } : null}
             />
           </View>
         </View>
@@ -399,7 +314,7 @@ export default function DashboardScreen({ navigation }) {
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Loading indicator */}
-        {loadingReports && (
+        {dashboardStore.loadingReports && (
           <View style={{ padding: 20, alignItems: 'center' }}>
             <ActivityIndicator size="large" color="#1e5a8e" />
             <Text style={{ color: '#6b7280', marginTop: 8 }}>Loading reports...</Text>
@@ -407,17 +322,17 @@ export default function DashboardScreen({ navigation }) {
         )}
         
         {/* Quick Stats Summary */}
-        {!loadingReports && (
+        {!dashboardStore.loadingReports && (
           <>
             <View style={styles.quickStats}>
               <View style={styles.quickStatItem}>
-                <Text style={styles.quickStatValue}>{leakReportsData?.totalCount || 0}</Text>
+                <Text style={styles.quickStatValue}>{dashboardStore.totalReports}</Text>
                 <Text style={styles.quickStatLabel}>Total</Text>
               </View>
               <View style={styles.quickStatDivider} />
               <View style={styles.quickStatItem}>
                 <Text style={[styles.quickStatValue, { color: '#9C27B0' }]}>
-                  {leakReportsData?.repairedCount || 0}
+                  {dashboardStore.repairedCount}
                 </Text>
                 <Text style={styles.quickStatLabel}>Repaired</Text>
               </View>
@@ -453,19 +368,14 @@ export default function DashboardScreen({ navigation }) {
         {/* Recent Activity Section */}
         <View style={styles.activityHeader}>
           <Text style={styles.sectionTitle}>Recent Activity</Text>
-          <TouchableOpacity onPress={async () => {
-            setLoadingReports(true);
-            const reportsData = await fetchLeakReports(userData?.empId);
-            setLeakReportsData(reportsData);
-            setLoadingReports(false);
-          }}>
+          <TouchableOpacity onPress={() => dashboardStore.loadLeakReports()}>
             <Text style={styles.refreshButton}>Refresh</Text>
           </TouchableOpacity>
         </View>
 
         {/* Activity List */}
         <View style={styles.activityContainer}>
-          {loadingReports ? (
+          {dashboardStore.loadingReports ? (
             <View style={{ padding: 20, alignItems: 'center' }}>
               <ActivityIndicator size="small" color="#1e5a8e" />
             </View>
@@ -502,7 +412,9 @@ export default function DashboardScreen({ navigation }) {
       {/* Bottom navigation now provided by Tab Navigator */}
     </View>
   );
-}
+});
+
+export default DashboardScreen;
 
 const styles = StyleSheet.create({
   container: {
@@ -539,9 +451,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1e5a8e',
   },
-  welcomeText: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.85)',
+  greeting: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.92)',
+    letterSpacing: 0.3,
+    textTransform: 'capitalize',
   },
   userName: {
     fontSize: 17,

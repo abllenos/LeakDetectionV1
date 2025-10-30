@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -15,60 +16,27 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { login } from '../services/interceptor';
 import { Alert } from 'react-native';
+import { observer } from 'mobx-react-lite';
+import { useAuthStore } from '../stores/RootStore';
 import { startLocationTracking } from '../services/locationTracker';
 
-export default function LoginScreen({ navigation }) {
-  const [userId, setUserId] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
-  const [focusedField, setFocusedField] = useState(null);
-  const [loading, setLoading] = useState(false);
+const LoginScreen = observer(({ navigation }) => {
+  const authStore = useAuthStore();
 
   // Load saved credentials on mount
   useEffect(() => {
-    loadSavedCredentials();
+    authStore.loadSavedCredentials();
   }, []);
 
-  const loadSavedCredentials = async () => {
-    try {
-      const savedUserId = await AsyncStorage.getItem('rememberedUserId');
-      const savedPassword = await AsyncStorage.getItem('rememberedPassword');
-      const remembered = await AsyncStorage.getItem('rememberMe');
-      
-      if (remembered === 'true' && savedUserId && savedPassword) {
-        setUserId(savedUserId);
-        setPassword(savedPassword);
-        setRememberMe(true);
-      }
-    } catch (error) {
-      console.error('Failed to load credentials:', error);
-    }
-  };
-
   const handleLogin = async () => {
-    if (!userId || !password) {
+    if (!authStore.userId || !authStore.password) {
       Alert.alert('Missing fields', 'Please enter your user ID and password.');
       return;
     }
-    setLoading(true);
+    
     try {
-      const userData = await login(userId, password);
-      
-      // Save credentials if Remember Me is checked
-      if (rememberMe) {
-        await AsyncStorage.setItem('rememberedUserId', userId);
-        await AsyncStorage.setItem('rememberedPassword', password);
-        await AsyncStorage.setItem('rememberMe', 'true');
-      } else {
-        // Clear saved credentials if Remember Me is unchecked
-        await AsyncStorage.removeItem('rememberedUserId');
-        await AsyncStorage.removeItem('rememberedPassword');
-        await AsyncStorage.removeItem('rememberMe');
-      }
+      await authStore.handleLogin();
       
       // Start background location tracking silently
       startLocationTracking();
@@ -76,8 +44,6 @@ export default function LoginScreen({ navigation }) {
       navigation.replace('MainTabs');
     } catch (error) {
       Alert.alert('Login Failed', error.message || 'Invalid credentials');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -112,51 +78,51 @@ export default function LoginScreen({ navigation }) {
             {/* User ID Input */}
             <View style={[
               styles.inputContainer,
-              focusedField === 'userId' && styles.inputContainerFocused
+              authStore.focusedField === 'userId' && styles.inputContainerFocused
             ]}>
               <Ionicons 
                 name="person-outline" 
                 size={20} 
-                color={focusedField === 'userId' ? '#1e5a8e' : '#9aa5b1'} 
+                color={authStore.focusedField === 'userId' ? '#1e5a8e' : '#9aa5b1'} 
                 style={styles.inputIcon}
               />
               <TextInput
                 style={styles.input}
                 placeholder="User ID"
                 placeholderTextColor="#9aa5b1"
-                value={userId}
-                onChangeText={setUserId}
+                value={authStore.userId}
+                onChangeText={authStore.setUserId}
                 autoCapitalize="none"
-                onFocus={() => setFocusedField('userId')}
-                onBlur={() => setFocusedField(null)}
+                onFocus={() => authStore.setFocusedField('userId')}
+                onBlur={() => authStore.setFocusedField(null)}
               />
             </View>
 
             {/* Password Input */}
             <View style={[
               styles.inputContainer,
-              focusedField === 'password' && styles.inputContainerFocused
+              authStore.focusedField === 'password' && styles.inputContainerFocused
             ]}>
               <Ionicons 
                 name="lock-closed-outline" 
                 size={20} 
-                color={focusedField === 'password' ? '#1e5a8e' : '#9aa5b1'} 
+                color={authStore.focusedField === 'password' ? '#1e5a8e' : '#9aa5b1'} 
                 style={styles.inputIcon}
               />
               <TextInput
                 style={styles.input}
                 placeholder="Password"
                 placeholderTextColor="#9aa5b1"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
+                value={authStore.password}
+                onChangeText={authStore.setPassword}
+                secureTextEntry={!authStore.showPassword}
                 autoCapitalize="none"
-                onFocus={() => setFocusedField('password')}
-                onBlur={() => setFocusedField(null)}
+                onFocus={() => authStore.setFocusedField('password')}
+                onBlur={() => authStore.setFocusedField(null)}
               />
-              <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+              <TouchableOpacity onPress={() => authStore.toggleShowPassword()}>
                 <Ionicons 
-                  name={showPassword ? 'eye-outline' : 'eye-off-outline'} 
+                  name={authStore.showPassword ? 'eye-outline' : 'eye-off-outline'} 
                   size={20} 
                   color="#9aa5b1" 
                 />
@@ -166,11 +132,11 @@ export default function LoginScreen({ navigation }) {
             {/* Remember Me Checkbox */}
             <TouchableOpacity 
               style={styles.rememberMeContainer}
-              onPress={() => setRememberMe(!rememberMe)}
+              onPress={() => authStore.toggleRememberMe()}
               activeOpacity={0.7}
             >
               <View style={styles.checkbox}>
-                {rememberMe && (
+                {authStore.rememberMe && (
                   <Ionicons name="checkmark" size={16} color="#1e5a8e" />
                 )}
               </View>
@@ -194,7 +160,7 @@ export default function LoginScreen({ navigation }) {
                 end={{ x: 1, y: 0 }}
                 style={styles.loginButtonGradient}
               >
-                <Text style={styles.loginButtonText}>{loading ? 'Signing in...' : 'LOGIN'}</Text>
+                <Text style={styles.loginButtonText}>{authStore.loading ? 'Signing in...' : 'LOGIN'}</Text>
                 <Ionicons name="arrow-forward" size={20} color="#fff" style={{ marginLeft: 8 }} />
               </LinearGradient>
             </TouchableOpacity>
@@ -212,7 +178,9 @@ export default function LoginScreen({ navigation }) {
       </KeyboardAvoidingView>
     </LinearGradient>
   );
-}
+});
+
+export default LoginScreen;
 
 const styles = StyleSheet.create({
   gradient: {
