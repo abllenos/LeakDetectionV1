@@ -1,14 +1,22 @@
-import { makeObservable, observable, action } from 'mobx';
+import { makeObservable, observable, action, runInAction } from 'mobx';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
 import { preCacheCustomers } from '../services/interceptor';
 import { forceCheckNewData } from '../services/dataChecker';
+import {
+  downloadTilesForArea,
+  calculateTileCount,
+  getCachedTileCount,
+  calculateStorageUsed,
+  clearTileCache,
+  hasOfflineTiles,
+} from '../services/offlineTileManager';
 
 export class SettingsStore {
   // Maps
-  mapsStatus = 'Offline Mode';
-  cachedTiles = 144;
-  storageUsed = 2.1; // MB
+  mapsStatus = 'Checking...';
+  cachedTiles = 0;
+  storageUsed = 0; // MB
   mapsLoading = false;
   updateModalVisible = false;
   updateProgress = 0;
@@ -186,6 +194,29 @@ export class SettingsStore {
   // Complex actions
   async checkCachedData() {
     try {
+      // Check offline map tiles status
+      const tilesAvailable = await hasOfflineTiles();
+      if (tilesAvailable) {
+        const tileCount = await getCachedTileCount();
+        const storage = await calculateStorageUsed();
+        
+        runInAction(() => {
+          this.cachedTiles = tileCount;
+          this.storageUsed = parseFloat(storage.toFixed(2));
+          this.mapsStatus = 'Offline Tiles Available';
+        });
+        
+        console.log(`📍 Offline maps: ${tileCount} tiles, ${storage.toFixed(2)} MB`);
+      } else {
+        runInAction(() => {
+          this.cachedTiles = 0;
+          this.storageUsed = 0;
+          this.mapsStatus = 'No Offline Tiles';
+        });
+        
+        console.log('📍 No offline maps available');
+      }
+      
       // Check completed download FIRST (existing data)
       const chunkCount = await AsyncStorage.getItem('allCustomers_chunks');
       const cachedCount = await AsyncStorage.getItem('allCustomers_count');
@@ -193,8 +224,10 @@ export class SettingsStore {
       if (chunkCount && cachedCount) {
         const count = parseInt(cachedCount);
         console.log(`📦 Download complete: ${count} customers available`);
-        this.clientDataAvailable = true;
-        this.clientRecordCount = count;
+        runInAction(() => {
+          this.clientDataAvailable = true;
+          this.clientRecordCount = count;
+        });
         return;
       }
       
@@ -203,8 +236,10 @@ export class SettingsStore {
       if (downloadCount) {
         const count = parseInt(downloadCount);
         console.log(`📥 Download in progress: ${count} customers downloaded`);
-        this.clientDataAvailable = true;
-        this.clientRecordCount = count;
+        runInAction(() => {
+          this.clientDataAvailable = true;
+          this.clientRecordCount = count;
+        });
         return;
       }
       
@@ -217,8 +252,10 @@ export class SettingsStore {
             const pagesFetched = Array.isArray(manifestData.pagesFetched) ? manifestData.pagesFetched.length : 0;
             const estimatedRecords = pagesFetched * 50; // Approximate: 50 records per page
             console.log(`📥 Download starting: ~${estimatedRecords} customers (estimated)`);
-            this.clientDataAvailable = true;
-            this.clientRecordCount = estimatedRecords;
+            runInAction(() => {
+              this.clientDataAvailable = true;
+              this.clientRecordCount = estimatedRecords;
+            });
             return;
           }
         } catch (e) {
@@ -227,12 +264,16 @@ export class SettingsStore {
       }
       
       console.log('⚠️ No customer data found');
-      this.clientDataAvailable = false;
-      this.clientRecordCount = 0;
+      runInAction(() => {
+        this.clientDataAvailable = false;
+        this.clientRecordCount = 0;
+      });
     } catch (error) {
       console.error('Failed to check cache:', error);
-      this.clientDataAvailable = false;
-      this.clientRecordCount = 0;
+      runInAction(() => {
+        this.clientDataAvailable = false;
+        this.clientRecordCount = 0;
+      });
     }
   }
 
@@ -260,45 +301,65 @@ export class SettingsStore {
     this.updateSuccess = false;
   }
 
-  startMapDownload() {
+  async startMapDownload() {
     this.mapsLoading = true;
     this.updateProgress = 0;
     this.updateSuccess = false;
+    this.mapsStatus = 'Downloading...';
 
-    // Simulate progress
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += Math.floor(Math.random() * 20) + 10;
-      if (progress >= 100) progress = 100;
-      this.updateProgress = progress;
-
-      if (progress >= 100) {
-        clearInterval(interval);
-        setTimeout(() => {
-          this.cachedTiles += 10;
-          this.storageUsed = +(this.storageUsed + 0.15).toFixed(2);
-          this.mapsStatus = 'Offline Mode';
-          this.mapsLoading = false;
-          this.updateSuccess = true;
-        }, 500);
-      }
-    }, 350);
+    try {
+      const totalTiles = calculateTileCount();
+      console.log(`[OfflineMaps] Starting download of ${totalTiles} tiles for Davao City...`);
+      
+      await downloadTilesForArea((progress) => {
+        this.updateProgress = progress.percentage;
+        console.log(`[OfflineMaps] Progress: ${progress.current}/${progress.total} (${progress.percentage}%)`);
+      });
+      
+      // Update stats
+      const tileCount = await getCachedTileCount();
+      const storage = await calculateStorageUsed();
+      
+      this.cachedTiles = tileCount;
+      this.storageUsed = parseFloat(storage.toFixed(2));
+      this.mapsStatus = 'Offline Tiles Available';
+      this.mapsLoading = false;
+      this.updateSuccess = true;
+      
+      console.log(`[OfflineMaps] Download complete: ${tileCount} tiles, ${storage.toFixed(2)} MB`);
+    } catch (error) {
+      console.error('[OfflineMaps] Download failed:', error);
+      this.mapsStatus = 'Download Failed';
+      this.mapsLoading = false;
+      Alert.alert('Download Failed', 'Failed to download offline maps. Please try again.');
+    }
   }
 
   clearCache() {
     this.clearCacheModalVisible = true;
   }
 
-  confirmClearCache() {
+  async confirmClearCache() {
     this.clearingCache = true;
-    setTimeout(() => {
-      this.cachedTiles = 0;
-      this.storageUsed = 0;
-      this.mapsStatus = 'Offline Mode';
+    
+    try {
+      const success = await clearTileCache();
+      
+      if (success) {
+        this.cachedTiles = 0;
+        this.storageUsed = 0;
+        this.mapsStatus = 'No Offline Tiles';
+        Alert.alert('Cache Cleared', 'Offline map cache has been removed.');
+      } else {
+        Alert.alert('Error', 'Failed to clear tile cache.');
+      }
+    } catch (error) {
+      console.error('[OfflineMaps] Clear cache error:', error);
+      Alert.alert('Error', 'Failed to clear tile cache.');
+    } finally {
       this.clearingCache = false;
       this.clearCacheModalVisible = false;
-      Alert.alert('Cache cleared', 'Offline map cache has been removed.');
-    }, 800);
+    }
   }
 
   deleteClientData() {
@@ -406,7 +467,10 @@ export class SettingsStore {
       await preCacheCustomers(
         (progress) => {
           try {
-            this.clientProgress = progress;
+            // Extract percentage from progress object
+            const percentage = typeof progress === 'object' ? progress.percentage : progress;
+            this.clientProgress = percentage || 0;
+            console.log(`📊 Client download progress: ${percentage}% (${progress.current || 0} records)`);
           } catch (e) {
             // Ignore setState after unmount
           }
@@ -468,9 +532,9 @@ export class SettingsStore {
   }
 
   reset() {
-    this.mapsStatus = 'Offline Mode';
-    this.cachedTiles = 144;
-    this.storageUsed = 2.1;
+    this.mapsStatus = 'Checking...';
+    this.cachedTiles = 0;
+    this.storageUsed = 0;
     this.mapsLoading = false;
     this.updateModalVisible = false;
     this.updateProgress = 0;

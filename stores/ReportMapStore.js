@@ -301,9 +301,11 @@ export class ReportMapStore {
 
   confirmStartDrag() {
     this.dragMode = true;
+    // Offset the drag pin to the northeast by a larger amount to make it clearly visible
+    // 0.003 degrees ≈ 333 meters offset - enough to see at default zoom
     this.dragPin = {
-      latitude: this.region.latitude + 0.001,
-      longitude: this.region.longitude + 0.001,
+      latitude: this.region.latitude + 0.003,
+      longitude: this.region.longitude + 0.003,
     };
     this.showDragConfirmModal = false;
   }

@@ -2,15 +2,18 @@ import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Text, TextInput, TouchableOpacity, Modal, Alert, StatusBar, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets, SafeAreaProvider } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import MapView, { UrlTile, Marker, Polyline } from 'react-native-maps';
+import MapView, { Marker, Polyline } from 'react-native-maps';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { observer } from 'mobx-react-lite';
+import { toJS } from 'mobx';
 import { useReportMapStore } from '../stores/RootStore';
+import OfflineTile from '../components/OfflineTile';
 
-const ReportScreen = observer(({ navigation, route }) => {
+const ReportScreenInner = observer(({ navigation, params }) => {
   const insets = useSafeAreaInsets();
   const store = useReportMapStore();
   const mapRef = useRef(null);
+  const [routeCoordinates, setRouteCoordinates] = React.useState([]);
   
   const TILE_SOURCES = [
     { name: 'OSM DE', url: 'https://tile.openstreetmap.de/{z}/{x}/{y}.png', attribution: '© OpenStreetMap contributors' },
@@ -18,6 +21,49 @@ const ReportScreen = observer(({ navigation, route }) => {
     { name: 'HOT', url: 'https://a.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', attribution: '© OpenStreetMap contributors' },
   ];
   const cycleTiles = () => store.cycleTiles();
+
+  // Fetch road route using free OSRM routing service
+  const fetchRoadRoute = React.useCallback(async (start, end) => {
+    if (!start || !end) return;
+    
+    try {
+      // OSRM (Open Source Routing Machine) - completely free, no API key needed
+      const url = `https://router.project-osrm.org/route/v1/foot/${start.longitude},${start.latitude};${end.longitude},${end.latitude}?overview=full&geometries=geojson`;
+      
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+        const route = data.routes[0];
+        const coordinates = route.geometry.coordinates.map(coord => ({
+          latitude: coord[1],
+          longitude: coord[0],
+        }));
+        setRouteCoordinates(coordinates);
+        console.log(`✅ Road route fetched: ${coordinates.length} points`);
+      } else {
+        // Fallback to straight line if routing fails
+        console.warn('⚠️ Routing failed, using straight line');
+        setRouteCoordinates([start, end]);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching road route:', error);
+      // Fallback to straight line on error
+      setRouteCoordinates([start, end]);
+    }
+  }, []);
+
+  // Update route when drag pin changes (with debouncing to reduce API calls)
+  React.useEffect(() => {
+    if (store.dragPin && store.marker) {
+      // Debounce: only fetch route after user stops dragging for 500ms
+      const timeoutId = setTimeout(() => {
+        fetchRoadRoute(toJS(store.marker), toJS(store.dragPin));
+      }, 500);
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [store.dragPin?.latitude, store.dragPin?.longitude, fetchRoadRoute]);
 
   useEffect(() => {
     (async () => {
@@ -30,9 +76,69 @@ const ReportScreen = observer(({ navigation, route }) => {
 
   // If navigated here with search results from ReportHome, ingest them
   useEffect(() => {
-    const incoming = route?.params?.searchResult;
-    const incomingMeter = route?.params?.meterNumber;
-    if (incoming) {
+    const incoming = params?.searchResult;
+    const incomingMeter = params?.meterNumber;
+    const incomingLat = params?.latitude;
+    const incomingLng = params?.longitude;
+    
+    // Handle incoming from Dashboard "View on Map" with direct coordinates
+    if (incomingLat && incomingLng) {
+      const reportLocation = {
+        latitude: parseFloat(incomingLat),
+        longitude: parseFloat(incomingLng)
+      };
+      
+      // Update store marker to show this location
+      store.updateMarkerAndLabel(reportLocation.latitude, reportLocation.longitude);
+      
+      // Animate map to this location
+      const nextRegion = {
+        latitude: reportLocation.latitude,
+        longitude: reportLocation.longitude,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01
+      };
+      mapRef.current?.animateToRegion(nextRegion, 800);
+      
+      // Clear params to prevent re-triggering
+      try {
+        navigation.setParams({ latitude: null, longitude: null });
+      } catch (e) { /* noop */ }
+    }
+    // Handle incoming meter number without coordinates - search for it
+    else if (incomingMeter && !incoming) {
+      console.log('🔍 Searching for meter coordinates:', incomingMeter);
+      // Set the meter number in the store and search
+      store.setMeterNumber(incomingMeter);
+      store.searchMeter().then((results) => {
+        // After search, check if we found results
+        if (results && results.length > 0) {
+          const first = results[0];
+          if (first.latitude && first.longitude) {
+            store.updateMarkerAndLabel(first.latitude, first.longitude);
+            const nextRegion = {
+              latitude: first.latitude,
+              longitude: first.longitude,
+              latitudeDelta: 0.01,
+              longitudeDelta: 0.01
+            };
+            mapRef.current?.animateToRegion(nextRegion, 800);
+            console.log('✅ Found meter location:', first);
+          }
+        } else {
+          console.warn('⚠️ No results found for meter:', incomingMeter);
+        }
+      }).catch((error) => {
+        console.error('❌ Error searching meter:', error);
+      });
+      
+      // Clear param
+      try {
+        navigation.setParams({ meterNumber: null });
+      } catch (e) { /* noop */ }
+    }
+    // Handle search results from ReportHome
+    else if (incoming) {
       const first = store.handleIncomingSearchResult(incoming, incomingMeter);
       if (first?.latitude && first?.longitude) {
         const nextRegion = { latitude: first.latitude, longitude: first.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 };
@@ -40,7 +146,38 @@ const ReportScreen = observer(({ navigation, route }) => {
       }
       try { navigation.setParams({ searchResult: null, meterNumber: null }); } catch (e) { /* noop */ }
     }
-  }, [route?.params]);
+  }, [params]);
+
+  // Handle useDragPin and useCurrentLocation params from ReportHomeScreen
+  useEffect(() => {
+    const useDragPin = params?.useDragPin;
+    const useCurrentLocation = params?.useCurrentLocation;
+    
+    if (useDragPin) {
+      // Directly enter drag mode without showing modals
+      console.log('Entering drag mode directly from ReportHome');
+      store.setShowSourceModal(false);
+      store.setShowDragConfirmModal(false);
+      store.confirmStartDrag(); // This sets dragMode=true and creates the drag pin
+      // Clear the param to prevent re-triggering
+      try { navigation.setParams({ useDragPin: null }); } catch (e) { /* noop */ }
+    } else if (useCurrentLocation) {
+      // Directly use current location
+      const coords = store.marker || store.region;
+      if (coords) {
+        navigation.navigate('LeakReportForm', {
+          meterData: null,
+          coordinates: {
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+          },
+          fromNearest: false,
+        });
+      }
+      // Clear the param
+      try { navigation.setParams({ useCurrentLocation: null }); } catch (e) { /* noop */ }
+    }
+  }, [params]);
 
   const handleMapPress = (e) => {
     if (!store.dragMode) {
@@ -115,6 +252,10 @@ const ReportScreen = observer(({ navigation, route }) => {
     }
   };
 
+  const handleDragPinOnMap = () => {
+    store.startDragMode();
+  };
+
   const confirmUseNearest = () => {
     const nextRegion = store.confirmUseNearest();
     if (nextRegion) {
@@ -133,6 +274,30 @@ const ReportScreen = observer(({ navigation, route }) => {
 
   const cancelDragModal = () => {
     store.setShowDragConfirmModal(false);
+  };
+
+  const startDragFromModal = () => {
+    store.confirmStartDrag();
+  };
+
+  const confirmDraggedLocation = () => {
+    if (store.dragPin) {
+      const coords = toJS(store.dragPin);
+      store.confirmDragLocation(); // This shows alert and exits drag mode
+      // Navigate to form with the dragged pin coordinates
+      navigation.navigate('LeakReportForm', {
+        meterData: null,
+        coordinates: {
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+        },
+        fromNearest: false,
+      });
+    }
+  };
+
+  const cancelDragMode = () => {
+    store.cancelDragMode();
   };
 
   return (
@@ -195,12 +360,12 @@ const ReportScreen = observer(({ navigation, route }) => {
         <MapView
           ref={mapRef}
           style={StyleSheet.absoluteFill}
-          initialRegion={store.region}
+          initialRegion={toJS(store.region)}
           onPress={handleMapPress}
           mapType="none"
           showsUserLocation
         >
-          <UrlTile
+          <OfflineTile
             urlTemplate={TILE_SOURCES[store.tileIndex].url}
             maximumZ={19}
             tileSize={256}
@@ -210,35 +375,41 @@ const ReportScreen = observer(({ navigation, route }) => {
           {/* Current location marker */}
           <Marker
             key="current-location"
-            coordinate={store.marker}
+            coordinate={toJS(store.marker)}
+            draggable={false}
             pinColor="red"
             title="Current Location"
             description={`Lat: ${store.marker.latitude.toFixed(4)}, Lon: ${store.marker.longitude.toFixed(4)}`}
+            anchor={{ x: 0.5, y: 1 }}
           />
 
           {/* Draggable/Confirmed pin (blue, visible in drag mode and after confirmation) */}
           {store.dragPin && (
             <>
-              {/* Line connecting red and blue pin */}
-              <Polyline
-                coordinates={[store.marker, store.dragPin]}
-                strokeColor="rgba(59, 130, 246, 0.7)" // semi-transparent blue
-                strokeWidth={6}
-                lineDashPattern={[10, 8]} // dashed line
-              />
+              {/* Smooth curved line connecting red and blue pin */}
+              {routeCoordinates.length > 0 && (
+                <Polyline
+                  coordinates={routeCoordinates}
+                  strokeColor="rgba(59, 130, 246, 0.7)" // semi-transparent blue
+                  strokeWidth={6}
+                />
+              )}
               <Marker
                 key="drag-pin"
-                coordinate={store.dragPin}
-                draggable={store.dragMode}
+                coordinate={toJS(store.dragPin)}
+                draggable={true}
                 pinColor="#3b82f6"
                 title={store.dragMode ? 'Drag to set location' : 'Selected Location'}
                 description={`Lat: ${store.dragPin.latitude.toFixed(4)}, Lon: ${store.dragPin.longitude.toFixed(4)}`}
+                anchor={{ x: 0.5, y: 1 }}
+                onDragStart={() => {
+                  console.log('Drag started');
+                }}
                 onDragEnd={(e) => {
+                  // Just update position, don't exit drag mode
                   const { latitude, longitude } = e.nativeEvent.coordinate;
+                  console.log('Drag ended at:', latitude, longitude);
                   store.setDragPin({ latitude, longitude });
-                  store.setDragMode(false);
-                  store.setCoordsLabel(`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
-                  Alert.alert('Location Confirmed', 'You can now proceed to report the leak.');
                 }}
                 onDrag={(e) => {
                   const { latitude, longitude } = e.nativeEvent.coordinate;
@@ -384,7 +555,7 @@ const ReportScreen = observer(({ navigation, route }) => {
             <View style={[styles.modalCard, { maxHeight: '70%', paddingBottom: 20 + insets.bottom }]}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <Text style={styles.modalTitle}>Search Results</Text>
-                <TouchableOpacity onPress={() => setShowSearchResults(false)}>
+                <TouchableOpacity onPress={() => store.setShowSearchResults(false)}>
                   <Ionicons name="close-circle" size={28} color="#9aa5b1" />
                 </TouchableOpacity>
               </View>
@@ -1095,5 +1266,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+// Wrapper to extract route params before passing to observer component
+const ReportScreen = ({ navigation, route }) => {
+  const params = route?.params || {};
+  return <ReportScreenInner navigation={navigation} params={params} />;
+};
 
 export default ReportScreen;

@@ -30,20 +30,44 @@ const LoginScreen = observer(({ navigation }) => {
   }, []);
 
   const handleLogin = async () => {
+    console.log('=== handleLogin called ===');
+    console.log('userId:', authStore.userId);
+    console.log('password:', authStore.password ? '***' : '(empty)');
+    
     if (!authStore.userId || !authStore.password) {
       Alert.alert('Missing fields', 'Please enter your user ID and password.');
       return;
     }
     
     try {
+      console.log('Calling authStore.handleLogin...');
       await authStore.handleLogin();
+      console.log('authStore.handleLogin completed successfully');
       
       // Start background location tracking silently
-      startLocationTracking();
+      try {
+        console.log('Starting location tracking...');
+        startLocationTracking();
+      } catch (trackingError) {
+        console.warn('Location tracking failed to start:', trackingError);
+        // Continue anyway - location tracking is optional
+      }
       
-      navigation.replace('MainTabs');
+      // Small delay to allow stores to settle
+      await new Promise(resolve => setTimeout(resolve, 150));
+      
+      console.log('Navigating to MainTabs...');
+      try {
+        navigation.replace('MainTabs');
+      } catch (navError) {
+        console.error('Navigation error:', navError);
+        // Fallback: try regular navigate instead of replace
+        navigation.navigate('MainTabs');
+      }
     } catch (error) {
-      Alert.alert('Login Failed', error.message || 'Invalid credentials');
+      console.error('Login error in handleLogin:', error);
+      const errorMessage = error?.response?.data?.message || error?.message || 'Invalid credentials';
+      Alert.alert('Login Failed', errorMessage);
     }
   };
 
@@ -168,7 +192,7 @@ const LoginScreen = observer(({ navigation }) => {
 
           {/* Footer */}
           <View style={styles.footer}>
-            <Text style={styles.footerText}>© DAVAO CITY WATER DISTRICT 2021</Text>
+            <Text style={styles.footerText}>© DAVAO CITY WATER DISTRICT 2025</Text>
             <Text style={styles.versionText}>
               ver. {Constants.expoConfig?.version || '1.0.0'}
               { (Constants.expoConfig?.android?.versionCode || Constants.expoConfig?.ios?.buildNumber) ? ` (b.${Constants.expoConfig?.android?.versionCode || Constants.expoConfig?.ios?.buildNumber})` : '' }

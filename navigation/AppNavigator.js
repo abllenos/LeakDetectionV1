@@ -86,9 +86,9 @@ function MainTabs() {
   );
 }
 
-export default function AppNavigator() {
+export default function AppNavigator({ navigationRef }) {
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Splash" component={SplashScreen} />
         <Stack.Screen name="Login" component={LoginScreen} />

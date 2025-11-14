@@ -5,45 +5,50 @@ import {
   StyleSheet, 
   ScrollView, 
   TouchableOpacity,
-  StatusBar
+  StatusBar,
+  Modal,
+  Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import AppHeader from '../components/AppHeader';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useEffect, useState, useRef } from 'react';
-import { Modal, FlatList, ActivityIndicator } from 'react-native';
-import { markAllRead, clearNotifications } from '../services/notifications';
+import { ActivityIndicator } from 'react-native';
 import { startPeriodicDataCheck, stopPeriodicDataCheck } from '../services/dataChecker';
 import { observer } from 'mobx-react-lite';
 import { useDashboardStore } from '../stores/RootStore';
 
 const DashboardScreen = observer(({ navigation }) => {
   const dashboardStore = useDashboardStore();
-  const [notifModalVisible, setNotifModalVisible] = useState(false);
   const dataCheckIntervalRef = useRef(null);
-
-  const handleNotificationClick = async (notification) => {
-    console.log('Notification clicked:', notification);
-    await dashboardStore.markNotificationAsRead(notification.id);
-    
-    // Handle different notification types
-    if (notification.type === 'data_update') {
-      setNotifModalVisible(false);
-      navigation.navigate('Settings');
-    }
-  };
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+  const [selectedActivity, setSelectedActivity] = useState(null);
+  const [detailsModalVisible, setDetailsModalVisible] = useState(false);
 
   useEffect(() => {
-    dashboardStore.loadNotifications();
-    dashboardStore.loadUserData();
-    dashboardStore.loadLeakReports();
+    console.log('[Dashboard] Component mounted, loading data...');
+    
+    const loadData = async () => {
+      try {
+        // Load user data and reports
+        await dashboardStore.loadUserData();
+        await dashboardStore.loadLeakReports();
+        setInitialLoadComplete(true);
+        console.log('[Dashboard] Initial data load complete');
+      } catch (error) {
+        console.error('[Dashboard] Error loading initial data:', error);
+        setInitialLoadComplete(true); // Still mark as complete to prevent infinite loading
+      }
+    };
+    
+    loadData();
     
     // Start periodic data checking (every 1 hour)
     dataCheckIntervalRef.current = startPeriodicDataCheck();
 
     const unsubscribe = navigation.addListener('focus', () => {
-      dashboardStore.loadNotifications();
+      console.log('[Dashboard] Screen focused, refreshing data...');
       dashboardStore.loadUserData();
       dashboardStore.loadLeakReports();
     });
@@ -52,6 +57,7 @@ const DashboardScreen = observer(({ navigation }) => {
       unsubscribe();
       // Stop periodic checking when component unmounts
       stopPeriodicDataCheck(dataCheckIntervalRef.current);
+      console.log('[Dashboard] Component unmounted');
     };
   }, []);
 
@@ -151,17 +157,30 @@ const DashboardScreen = observer(({ navigation }) => {
   };
 
   // Transform API reports to recent activity format (show latest 5)
-  const recentActivity = dashboardStore.recentReports.map((report, index) => ({
-    id: report.id || index,
-    title: `${report.refNo || 'N/A'}`,
-    location: report.reportedLocation || 'Unknown location',
-    time: getTimeAgo(report.dtReported),
-    iconName: getLeakTypeIcon(report.dispatchStat),
-    iconFamily: 'Ionicons',
-    iconBg: getLeakTypeColor(report.dispatchStat),
-    meterNumber: report.referenceMtr,
-    dispatchStatus: report.dispatchStat
-  }));
+  const recentActivity = dashboardStore.recentReports.map((report, index) => {
+    // Debug: Log report structure to find coordinate fields
+    if (index === 0) {
+      console.log('📍 Report structure:', Object.keys(report));
+      console.log('📍 Full first report:', JSON.stringify(report, null, 2));
+    }
+    
+    return {
+      id: report.id || index,
+      title: `${report.refNo || 'N/A'}`,
+      location: report.reportedLocation || 'Unknown location',
+      time: getTimeAgo(report.dtReported),
+      iconName: getLeakTypeIcon(report.dispatchStat),
+      iconFamily: 'Ionicons',
+      iconBg: getLeakTypeColor(report.dispatchStat),
+      meterNumber: report.referenceMtr,
+      dispatchStatus: report.dispatchStat,
+      // Try multiple possible coordinate field names
+      latitude: report.latitude || report.lat || report.Latitude || report.LAT,
+      longitude: report.longitude || report.lng || report.Longitude || report.LNG,
+      // Store full report object for potential future use
+      fullReport: report
+    };
+  });
 
   const renderIcon = (iconFamily, iconName, size, color) => {
     switch (iconFamily) {
@@ -197,120 +216,8 @@ const DashboardScreen = observer(({ navigation }) => {
             <Text style={styles.userName}>{dashboardStore.userName}</Text>
           </View>
         </View>
-        <TouchableOpacity style={styles.notificationButton} onPress={() => { setNotifModalVisible(true); }}>
-          <Ionicons name="notifications-outline" size={24} color="#fff" />
-          {dashboardStore.unreadCount > 0 ? (
-            <View style={[styles.notificationBadge, { width: 18, height: 18, borderRadius: 9, justifyContent: 'center', alignItems: 'center' }]}>
-              <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>{dashboardStore.unreadCount}</Text>
-            </View>
-          ) : (
-            <View style={styles.notificationBadge} />
-          )}
-        </TouchableOpacity>
+        {/* Notification button removed - SMS feature planned for future */}
       </LinearGradient>
-
-      {/* Notifications Modal */}
-      <Modal visible={notifModalVisible} animationType="slide" transparent onRequestClose={() => setNotifModalVisible(false)}>
-        <View style={styles.notifModalOverlay}>
-          <View style={styles.notifModalContainer}>
-            {/* Header */}
-            <View style={styles.notifModalHeader}>
-              <View style={styles.notifHeaderLeft}>
-                <View style={styles.notifIconCircle}>
-                  <Ionicons name="notifications" size={22} color="#1e5a8e" />
-                </View>
-                <View>
-                  <Text style={styles.notifModalTitle}>Notifications</Text>
-                  <Text style={styles.notifModalSubtitle}>
-                    {dashboardStore.unreadCount > 0 ? `${dashboardStore.unreadCount} unread` : 'All caught up'}
-                  </Text>
-                </View>
-              </View>
-              <TouchableOpacity onPress={() => setNotifModalVisible(false)} style={styles.notifCloseBtn}>
-                <Ionicons name="close" size={24} color="#64748b" />
-              </TouchableOpacity>
-            </View>
-
-            {/* Action Buttons */}
-            {(dashboardStore.notifications || []).length > 0 && (
-              <View style={styles.notifActions}>
-                <TouchableOpacity 
-                  onPress={async () => { await markAllRead(); await dashboardStore.loadNotifications(); }}
-                  style={styles.notifActionBtn}
-                >
-                  <Ionicons name="checkmark-done" size={16} color="#1e5a8e" />
-                  <Text style={styles.notifActionText}>Mark all read</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  onPress={async () => { await clearNotifications(); await dashboardStore.loadNotifications(); }}
-                  style={[styles.notifActionBtn, { marginLeft: 8 }]}
-                >
-                  <Ionicons name="trash-outline" size={16} color="#ef4444" />
-                  <Text style={[styles.notifActionText, { color: '#ef4444' }]}>Clear all</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* Notifications List */}
-            <FlatList
-              data={dashboardStore.notifications || []}
-              keyExtractor={(i) => String(i.id)}
-              renderItem={({ item }) => (
-                <TouchableOpacity 
-                  style={[styles.notifItem, !item.read && styles.notifItemUnread]}
-                  onPress={() => handleNotificationClick(item)}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.notifItemHeader}>
-                    {!item.read && <View style={styles.notifUnreadDot} />}
-                    <Text style={[styles.notifItemTitle, !item.read && styles.notifItemTitleUnread]}>
-                      {item.title}
-                    </Text>
-                  </View>
-                  {item.message ? (
-                    <Text style={styles.notifItemBody}>{item.message}</Text>
-                  ) : item.body ? (
-                    <Text style={styles.notifItemBody}>{item.body}</Text>
-                  ) : null}
-                  {item.data && item.data.difference && (
-                    <View style={styles.notifDataBadge}>
-                      <Ionicons name="cloud-download-outline" size={14} color="#1e5a8e" />
-                      <Text style={styles.notifDataText}>
-                        {item.data.difference.toLocaleString()} new records
-                      </Text>
-                    </View>
-                  )}
-                  <View style={styles.notifItemFooter}>
-                    <Ionicons name="time-outline" size={12} color="#94a3b8" />
-                    <Text style={styles.notifItemTime}>
-                      {new Date(item.createdAt).toLocaleString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: 'numeric',
-                        minute: '2-digit',
-                        hour12: true
-                      })}
-                    </Text>
-                    {item.type === 'data_update' && (
-                      <View style={styles.notifActionIndicator}>
-                        <Ionicons name="chevron-forward" size={14} color="#64748b" />
-                      </View>
-                    )}
-                  </View>
-                </TouchableOpacity>
-              )}
-              ListEmptyComponent={
-                <View style={styles.notifEmptyState}>
-                  <Ionicons name="notifications-off-outline" size={48} color="#cbd5e1" />
-                  <Text style={styles.notifEmptyTitle}>No notifications</Text>
-                  <Text style={styles.notifEmptySubtitle}>You're all caught up!</Text>
-                </View>
-              }
-              contentContainerStyle={(dashboardStore.notifications || []).length === 0 ? { flex: 1 } : null}
-            />
-          </View>
-        </View>
-      </Modal>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Loading indicator */}
@@ -385,6 +292,10 @@ const DashboardScreen = observer(({ navigation }) => {
                 key={activity.id} 
                 style={styles.activityCard}
                 activeOpacity={0.7}
+                onPress={() => {
+                  setSelectedActivity(activity);
+                  setDetailsModalVisible(true);
+                }}
               >
                 <View style={[styles.activityIconContainer, { backgroundColor: activity.iconBg + '20' }]}>
                   {renderIcon(activity.iconFamily, activity.iconName, 20, activity.iconBg)}
@@ -408,6 +319,154 @@ const DashboardScreen = observer(({ navigation }) => {
           )}
         </View>
       </ScrollView>
+
+      {/* Report Details Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={detailsModalVisible}
+        onRequestClose={() => setDetailsModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.detailsModalContainer}>
+            {/* Modal Header */}
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Report Details</Text>
+              <TouchableOpacity onPress={() => setDetailsModalVisible(false)}>
+                <Ionicons name="close-circle" size={28} color="#64748b" />
+              </TouchableOpacity>
+            </View>
+
+            {selectedActivity && (
+              <ScrollView style={styles.modalContent}>
+                {/* Reference Number */}
+                <View style={styles.detailRow}>
+                  <View style={styles.detailIconContainer}>
+                    <Ionicons name="document-text" size={20} color="#1e5a8e" />
+                  </View>
+                  <View style={styles.detailTextContainer}>
+                    <Text style={styles.detailLabel}>Reference Number</Text>
+                    <Text style={styles.detailValue}>{selectedActivity.title}</Text>
+                  </View>
+                </View>
+
+                {/* Location */}
+                <View style={styles.detailRow}>
+                  <View style={styles.detailIconContainer}>
+                    <Ionicons name="location" size={20} color="#1e5a8e" />
+                  </View>
+                  <View style={styles.detailTextContainer}>
+                    <Text style={styles.detailLabel}>Location</Text>
+                    <Text style={styles.detailValue}>{selectedActivity.location}</Text>
+                  </View>
+                </View>
+
+                {/* Meter Number */}
+                {selectedActivity.meterNumber && (
+                  <View style={styles.detailRow}>
+                    <View style={styles.detailIconContainer}>
+                      <Ionicons name="speedometer" size={20} color="#1e5a8e" />
+                    </View>
+                    <View style={styles.detailTextContainer}>
+                      <Text style={styles.detailLabel}>Meter Number</Text>
+                      <Text style={styles.detailValue}>{selectedActivity.meterNumber}</Text>
+                    </View>
+                  </View>
+                )}
+
+                {/* Time Reported */}
+                <View style={styles.detailRow}>
+                  <View style={styles.detailIconContainer}>
+                    <Ionicons name="time" size={20} color="#1e5a8e" />
+                  </View>
+                  <View style={styles.detailTextContainer}>
+                    <Text style={styles.detailLabel}>Time Reported</Text>
+                    <Text style={styles.detailValue}>{selectedActivity.time}</Text>
+                  </View>
+                </View>
+
+                {/* Status */}
+                <View style={styles.detailRow}>
+                  <View style={styles.detailIconContainer}>
+                    <Ionicons name={selectedActivity.iconName} size={20} color={selectedActivity.iconBg} />
+                  </View>
+                  <View style={styles.detailTextContainer}>
+                    <Text style={styles.detailLabel}>Dispatch Status</Text>
+                    <View style={[styles.statusBadge, { backgroundColor: selectedActivity.iconBg + '20' }]}>
+                      <Text style={[styles.statusBadgeText, { color: selectedActivity.iconBg }]}>
+                        {selectedActivity.dispatchStatus === 0 ? 'Pending' :
+                         selectedActivity.dispatchStatus === 1 ? 'Dispatched' :
+                         selectedActivity.dispatchStatus === 2 ? 'Repaired' :
+                         selectedActivity.dispatchStatus === 3 ? 'Closed' :
+                         selectedActivity.dispatchStatus === 4 ? 'Not Found' : 'Unknown'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Action Buttons */}
+                <View style={styles.modalActions}>
+              <TouchableOpacity 
+                style={styles.modalActionButton}
+                onPress={() => {
+                  setDetailsModalVisible(false);
+                  
+                  // Check if we have direct coordinates
+                  if (selectedActivity.latitude && selectedActivity.longitude) {
+                    navigation.navigate('Report', { 
+                      screen: 'ReportMap',
+                      params: { 
+                        refNo: selectedActivity.title,
+                        latitude: selectedActivity.latitude,
+                        longitude: selectedActivity.longitude,
+                        location: selectedActivity.location,
+                        meterNumber: selectedActivity.meterNumber
+                      }
+                    });
+                  } 
+                  // Try to get coordinates from meter number if available
+                  else if (selectedActivity.meterNumber) {
+                    Alert.alert(
+                      'Searching Location',
+                      'Looking up meter coordinates...',
+                      [{ text: 'OK' }]
+                    );
+                    
+                    // Navigate to Report tab with meter number to search
+                    navigation.navigate('Report', { 
+                      screen: 'ReportMap',
+                      params: { 
+                        meterNumber: selectedActivity.meterNumber,
+                        refNo: selectedActivity.title
+                      }
+                    });
+                  } 
+                  else {
+                    Alert.alert(
+                      'Location Unavailable',
+                      'GPS coordinates and meter information are not available for this report.',
+                      [{ text: 'OK' }]
+                    );
+                  }
+                }}
+              >
+                <Ionicons name="map" size={20} color="#fff" />
+                <Text style={styles.modalActionText}>View on Map</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.modalActionButton, { backgroundColor: '#64748b' }]}
+                onPress={() => setDetailsModalVisible(false)}
+              >
+                <Ionicons name="close" size={20} color="#fff" />
+                <Text style={styles.modalActionText}>Close</Text>
+              </TouchableOpacity>
+                </View>
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
 
       {/* Bottom navigation now provided by Tab Navigator */}
     </View>
@@ -829,6 +888,99 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#94a3b8',
     marginTop: 4,
+  },
+  
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  detailsModalContainer: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '80%',
+    paddingBottom: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1e293b',
+  },
+  modalContent: {
+    padding: 20,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 20,
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  detailIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#e6f0fb',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  detailTextContainer: {
+    flex: 1,
+  },
+  detailLabel: {
+    fontSize: 12,
+    color: '#64748b',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    fontWeight: '600',
+  },
+  detailValue: {
+    fontSize: 16,
+    color: '#1e293b',
+    fontWeight: '500',
+  },
+  statusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
+  statusBadgeText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 10,
+  },
+  modalActionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1e5a8e',
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 8,
+  },
+  modalActionText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
   },
   
   // bottom navigation styles removed - handled by Tab Navigator

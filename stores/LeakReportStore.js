@@ -1,6 +1,7 @@
 import { makeObservable, observable, action, runInAction } from 'mobx';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchDmaCodes, submitLeakReport } from '../services/interceptor';
+import { addToQueue, checkOnlineStatus } from '../services/offlineQueue';
 
 class LeakReportStore {
   // Form fields
@@ -153,6 +154,7 @@ class LeakReportStore {
   async submit({ meterData, coordinates, geom }) {
     if (this.submitting) return { ok: false, message: 'Already submitting' };
     this.submitting = true;
+    
     try {
       const payload = {
         leakType: this.leakType,
@@ -171,16 +173,79 @@ class LeakReportStore {
         coordinates,
         geom,
       };
-      await submitLeakReport(payload);
-      runInAction(() => {
-        this.submitting = false;
-      });
-      return { ok: true };
+      
+      // Check if online
+      const isOnline = await checkOnlineStatus();
+      
+      if (isOnline) {
+        // If online, submit directly
+        console.log('[LeakReportStore] Online - submitting directly to server');
+        await submitLeakReport(payload);
+        
+        runInAction(() => {
+          this.submitting = false;
+        });
+        
+        return { ok: true, message: 'Report submitted successfully' };
+      } else {
+        // If offline, add to queue
+        console.log('[LeakReportStore] Offline - adding to queue');
+        await addToQueue({
+          type: 'leak_report',
+          data: payload,
+        });
+        
+        runInAction(() => {
+          this.submitting = false;
+        });
+        
+        return { 
+          ok: true, 
+          message: 'You are offline. Report saved and will be submitted when connection is restored.',
+          offline: true 
+        };
+      }
     } catch (err) {
+      console.error('[LeakReportStore] Submit error:', err);
+      
       runInAction(() => {
         this.submitting = false;
       });
-      return { ok: false, message: err?.message || 'Submission failed' };
+      
+      // On error, try to save to queue as fallback
+      try {
+        const payload = {
+          leakType: this.leakType,
+          location: this.location,
+          covering: this.covering,
+          causeOfLeak: this.causeOfLeak,
+          causeOther: this.causeOther,
+          dma: this.dma,
+          contactName: this.contactName,
+          contactNumber: this.contactNumber,
+          landmark: this.landmark,
+          leakPhotos: this.leakPhotos,
+          landmarkPhoto: this.landmarkPhoto,
+          pressure: this.pressure,
+          meterData: coordinates && coordinates.latitude ? { coordinates } : null,
+          coordinates,
+          geom: coordinates,
+        };
+        
+        await addToQueue({
+          type: 'leak_report',
+          data: payload,
+        });
+        
+        return { 
+          ok: true, 
+          message: 'Report saved offline and will be submitted when connection is restored.',
+          offline: true 
+        };
+      } catch (queueErr) {
+        console.error('[LeakReportStore] Failed to save to queue:', queueErr);
+        return { ok: false, message: err?.message || 'Submission failed' };
+      }
     }
   }
 }

@@ -148,9 +148,11 @@ class NearestMetersStore {
       baseLat = nearestMeters[0].latitude;
       baseLng = nearestMeters[0].longitude;
     }
+    // Offset the drag pin by a larger amount to make it clearly visible
+    // 0.003 degrees ≈ 333 meters offset - enough to see at default zoom
     this.dragPin = {
-      latitude: baseLat + 0.004,
-      longitude: baseLng + 0.004,
+      latitude: baseLat + 0.003,
+      longitude: baseLng + 0.003,
     };
     this.pinReady = true;
     this.dragMode = true;

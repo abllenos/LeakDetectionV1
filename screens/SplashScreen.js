@@ -2,16 +2,46 @@ import React, { useEffect, useRef } from 'react';
 import { View, Text, Image, StyleSheet, Dimensions, TouchableOpacity, Animated } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import Constants from 'expo-constants';
+import { observer } from 'mobx-react-lite';
+import { useAuthStore } from '../stores/RootStore';
+import { startLocationTracking } from '../services/locationTracker';
 
 const { width, height } = Dimensions.get('window');
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
-export default function SplashScreen({ navigation }) {
+const SplashScreen = observer(({ navigation }) => {
+  const authStore = useAuthStore();
   const wave1Anim = useRef(new Animated.Value(0)).current;
   const wave2Anim = useRef(new Animated.Value(0)).current;
   const wave3Anim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    // Check for auto-login
+    const checkAuth = async () => {
+      try {
+        const isAuthenticated = await authStore.checkAutoLogin();
+        if (isAuthenticated) {
+          console.log('[SplashScreen] User authenticated, navigating to MainTabs');
+          // Start location tracking for authenticated users
+          try {
+            startLocationTracking();
+          } catch (trackingError) {
+            console.warn('Location tracking failed to start:', trackingError);
+          }
+          // Small delay for smooth transition
+          setTimeout(() => {
+            navigation.replace('MainTabs');
+          }, 1000);
+        } else {
+          console.log('[SplashScreen] No valid session found');
+        }
+      } catch (error) {
+        console.error('[SplashScreen] Auth check error:', error);
+      }
+    };
+
+    checkAuth();
+
     // Create wave animations with different speeds
     const createWaveAnimation = (animValue, duration) => {
       return Animated.loop(
@@ -69,7 +99,7 @@ export default function SplashScreen({ navigation }) {
           style={styles.logo}
           resizeMode="contain"
         />
-        <Text style={styles.title}>DCWD LEAK REPAIR APP</Text>
+        <Text style={styles.title}>DCWD LEAK DETECTION APP</Text>
       </View>
 
       {/* Wave Design at Bottom */}
@@ -110,7 +140,7 @@ export default function SplashScreen({ navigation }) {
 
       {/* Footer Text */}
       <View style={styles.footer}>
-        <Text style={styles.footerText}>© DAVAO CITY WATER DISTRICT 2021</Text>
+        <Text style={styles.footerText}>© DAVAO CITY WATER DISTRICT 2025</Text>
         <Text style={styles.versionText}>
           ver. {Constants.expoConfig?.version || '2.0.0'}
           {(Constants.expoConfig?.android?.versionCode || Constants.expoConfig?.ios?.buildNumber) ? ` (b.${Constants.expoConfig?.android?.versionCode || Constants.expoConfig?.ios?.buildNumber})` : ''}
@@ -118,7 +148,9 @@ export default function SplashScreen({ navigation }) {
       </View>
     </TouchableOpacity>
   );
-}
+});
+
+export default SplashScreen;
 
 const styles = StyleSheet.create({
   container: {

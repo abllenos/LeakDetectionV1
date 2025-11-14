@@ -20,10 +20,35 @@ import { stopLocationTracking } from '../services/locationTracker';
 import { forceCheckNewData } from '../services/dataChecker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { observer } from 'mobx-react-lite';
-import { useSettingsStore } from '../stores/RootStore';
+import { useSettingsStore, useOfflineStore } from '../stores/RootStore';
 
 const SettingsScreen = observer(({ navigation }) => {
   const store = useSettingsStore();
+  const offlineStore = useOfflineStore();
+
+  // Helper function to calculate remaining time before auto-logout
+  const getRemainingTimeText = () => {
+    if (offlineStore.isOnline) {
+      return 'N/A (Currently online)';
+    }
+    
+    if (!offlineStore.lastOnlineTime) {
+      return 'N/A';
+    }
+
+    const OFFLINE_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24 hours
+    const offlineDuration = Date.now() - offlineStore.lastOnlineTime;
+    const remainingMs = OFFLINE_TIMEOUT_MS - offlineDuration;
+
+    if (remainingMs <= 0) {
+      return 'Session expired';
+    }
+
+    const hours = Math.floor(remainingMs / (60 * 60 * 1000));
+    const minutes = Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000));
+
+    return `${hours}h ${minutes}m`;
+  };
 
   // Check if customer data is cached on mount and poll during download
   useEffect(() => {
@@ -55,11 +80,11 @@ const SettingsScreen = observer(({ navigation }) => {
     // Clear authentication tokens
     await logout();
     
-  store.setLogoutModalVisible(false);
-    // Navigate back to login and reset the navigation stack
+    store.setLogoutModalVisible(false);
+    // Navigate back to splash screen and reset the navigation stack
     navigation.reset({
       index: 0,
-      routes: [{ name: 'Login' }],
+      routes: [{ name: 'Splash' }],
     });
   };
 
@@ -102,9 +127,18 @@ const SettingsScreen = observer(({ navigation }) => {
           </View>
 
           <View style={styles.row}>
-            <Text style={styles.label}>Status:</Text>
+            <Text style={styles.label}>Tiles Cached:</Text>
             <View style={styles.statusBadge}>
               <Text style={styles.statusText}>{store.mapsStatus}</Text>
+            </View>
+          </View>
+
+          <View style={styles.row}>
+            <Text style={styles.label}>Current Mode:</Text>
+            <View style={[styles.statusBadge, { backgroundColor: offlineStore.isOnline ? '#d1fae5' : '#fee2e2' }]}>
+              <Text style={[styles.statusText, { color: offlineStore.isOnline ? '#059669' : '#dc2626' }]}>
+                {offlineStore.isOnline ? 'Using Online Tiles' : (store.cachedTiles > 0 ? 'Using Offline Tiles' : 'No Connection')}
+              </Text>
             </View>
           </View>
 
@@ -128,6 +162,120 @@ const SettingsScreen = observer(({ navigation }) => {
               <Text style={styles.outlineBtnText}>Clear Cache</Text>
             </TouchableOpacity>
           </View>
+        </View>
+
+        {/* Offline Queue Card */}
+        <View style={styles.card}>
+          <View style={styles.cardHeaderRow}>
+            <Ionicons name="cloud-offline" size={18} color="#1e5a8e" />
+            <Text style={styles.cardTitle}>  Offline Queue</Text>
+          </View>
+
+          <View style={styles.row}>
+            <Text style={styles.label}>Network Status:</Text>
+            <View style={[styles.statusBadge, { backgroundColor: offlineStore.isOnline ? '#d1fae5' : '#fee2e2' }]}>
+              <Text style={[styles.statusText, { color: offlineStore.isOnline ? '#059669' : '#dc2626' }]}>
+                {offlineStore.isOnline ? 'Online' : 'Offline'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.rowBetween}>
+            <View>
+              <Text style={styles.smallLabel}>Pending Items:</Text>
+              <Text style={styles.valueText}>{offlineStore.pendingCount}</Text>
+            </View>
+            <View>
+              <Text style={styles.smallLabel}>Failed Items:</Text>
+              <Text style={styles.valueText}>{offlineStore.failedCount}</Text>
+            </View>
+            <View>
+              <Text style={styles.smallLabel}>Last Sync:</Text>
+              <Text style={styles.valueText}>
+                {offlineStore.lastSyncTime ? new Date(offlineStore.lastSyncTime).toLocaleTimeString() : 'Never'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Auto-logout warning when offline */}
+          {!offlineStore.isOnline && offlineStore.lastOnlineTime && (
+            <View style={styles.offlineWarningBox}>
+              <Ionicons name="warning" size={16} color="#f59e0b" />
+              <View style={{ flex: 1, marginLeft: 8 }}>
+                <Text style={styles.offlineWarningTitle}>Auto-logout Timer</Text>
+                <Text style={styles.offlineWarningText}>
+                  You will be automatically logged out in {getRemainingTimeText()} if you remain offline. Please connect to the internet to reset the timer.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* Auto-sync info when offline with pending items */}
+          {!offlineStore.isOnline && offlineStore.pendingCount > 0 && (
+            <View style={[styles.offlineWarningBox, { backgroundColor: '#eff6ff', borderColor: '#3b82f6' }]}>
+              <Ionicons name="cloud-upload-outline" size={16} color="#3b82f6" />
+              <View style={{ flex: 1, marginLeft: 8 }}>
+                <Text style={[styles.offlineWarningTitle, { color: '#1e40af' }]}>Auto-Sync Enabled</Text>
+                <Text style={[styles.offlineWarningText, { color: '#1e40af' }]}>
+                  {offlineStore.pendingCount} item(s) will automatically sync when you reconnect to the internet.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {offlineStore.isSyncing && (
+            <View style={styles.syncProgressWrap}>
+              <ActivityIndicator size="small" color="#1e5a8e" />
+              <Text style={styles.syncProgressText}>Syncing... {offlineStore.syncProgress}%</Text>
+            </View>
+          )}
+
+          <View style={styles.actionsRow}>
+            <TouchableOpacity 
+              style={[styles.primaryBtn, { flex: 1 }]} 
+              onPress={() => offlineStore.startSync()} 
+              disabled={!offlineStore.isOnline || offlineStore.isSyncing || offlineStore.pendingCount === 0}
+            >
+              {offlineStore.isSyncing ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="sync" size={16} color="#fff" />
+                  <Text style={styles.primaryBtnText}>Sync Now</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.outlineBtn} 
+              onPress={() => offlineStore.retryFailed()}
+              disabled={offlineStore.failedCount === 0 || offlineStore.isSyncing}
+            >
+              <Text style={styles.outlineBtnText}>Retry Failed</Text>
+            </TouchableOpacity>
+          </View>
+
+          {(offlineStore.pendingCount > 0 || offlineStore.failedCount > 0) && (
+            <TouchableOpacity 
+              style={[styles.outlineBtnFull, { borderColor: '#ef4444', marginTop: 8 }]} 
+              onPress={() => {
+                Alert.alert(
+                  'Clear Queue',
+                  'Are you sure you want to clear all pending and failed items? This action cannot be undone.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { 
+                      text: 'Clear', 
+                      style: 'destructive',
+                      onPress: () => offlineStore.clearAllQueue()
+                    }
+                  ]
+                );
+              }}
+            >
+              <Text style={[styles.outlineBtnText, { color: '#ef4444' }]}>Clear Queue</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Offline Meter Search Data */}
@@ -676,6 +824,41 @@ const styles = StyleSheet.create({
   progressBarFill: { height: 12, backgroundColor: '#6366f1' },
   progressText: { marginTop: 8, fontSize: 13, color: '#374151', fontWeight: '600' },
   successText: { fontSize: 14, color: '#059669', fontWeight: '700', marginBottom: 6 },
+  syncProgressWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    padding: 10,
+    backgroundColor: '#f0f9ff',
+    borderRadius: 8,
+  },
+  syncProgressText: {
+    fontSize: 14,
+    color: '#1e5a8e',
+    fontWeight: '600',
+  },
+  offlineWarningBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#fffbeb',
+    borderLeftWidth: 4,
+    borderLeftColor: '#f59e0b',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 12,
+  },
+  offlineWarningTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#92400e',
+    marginBottom: 4,
+  },
+  offlineWarningText: {
+    fontSize: 12,
+    color: '#78350f',
+    lineHeight: 18,
+  },
 });
 
 export default SettingsScreen;

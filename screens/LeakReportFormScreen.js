@@ -19,8 +19,7 @@ import { submitLeakReport } from '../services/interceptor';
 import { observer } from 'mobx-react-lite';
 import { useLeakReportStore } from '../stores/RootStore';
 
-const LeakReportFormScreen = observer(({ route, navigation }) => {
-  const { meterData, coordinates, fromNearest } = route.params || {};
+const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNearest, navigation }) => {
   const form = useLeakReportStore();
 
   const pickLeakPhoto = async () => {
@@ -168,10 +167,6 @@ const LeakReportFormScreen = observer(({ route, navigation }) => {
       Alert.alert('Missing info', 'Please describe the cause of leak.');
       return;
     }
-    if (!form.dma) {
-      Alert.alert('Missing info', 'Please select a DMA.');
-      return;
-    }
     if (!form.contactName || !form.contactNumber) {
       Alert.alert('Missing info', 'Please provide contact person and number.');
       return;
@@ -274,6 +269,12 @@ const LeakReportFormScreen = observer(({ route, navigation }) => {
           </Text>
         </View>
 
+        {/* Instructions */}
+        <View style={styles.instructionRow}>
+          <Ionicons name="information-circle" size={18} color="#1e5a8e" />
+          <Text style={styles.instructionText}>  Please provide details about the leak</Text>
+        </View>
+
         {/* Pressure */}
         <Text style={styles.sectionLabel}>PRESSURE <Text style={{ color: '#ef4444' }}>*</Text></Text>
         <View style={styles.radioGroupSmall}>
@@ -285,44 +286,6 @@ const LeakReportFormScreen = observer(({ route, navigation }) => {
             <View style={[styles.radioCircle, form.pressure === 'High' && styles.radioCircleActive]} />
             <Text style={styles.radioLabel}>HIGH</Text>
           </TouchableOpacity>
-        </View>
-
-        {/* DMA */}
-        <Text style={styles.sectionLabel}>DMA</Text>
-        <TouchableOpacity style={styles.inputWrap} onPress={() => form.setShowDmaModal(true)}>
-          <Ionicons name="list" size={18} color="#9aa5b1" style={{ marginRight: 10 }} />
-          <Text style={[styles.input, { paddingVertical: 0 }]}>{form.dma || 'Select'}</Text>
-        </TouchableOpacity>
-
-        {/* DMA Selection Modal */}
-        <Modal visible={form.showDmaModal} transparent animationType="slide" onRequestClose={() => form.setShowDmaModal(false)}>
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>Select DMA</Text>
-              <ScrollView>
-                {form.dmaLoading ? (
-                  <ActivityIndicator size="small" color="#1e5a8e" />
-                ) : form.dmaOptions.length ? (
-                  form.dmaOptions.map((d, i) => (
-                    <TouchableOpacity key={i} style={styles.dmaItem} onPress={() => { form.setDma(d); form.setShowDmaModal(false); }}>
-                      <Text style={styles.dmaText}>{d}</Text>
-                    </TouchableOpacity>
-                  ))
-                ) : (
-                  <Text style={{ color: '#6b7280', padding: 8 }}>No DMA options available</Text>
-                )}
-              </ScrollView>
-              <TouchableOpacity style={[styles.modalCancel, { marginTop: 12 }]} onPress={() => form.setShowDmaModal(false)}>
-                <Text style={styles.modalCancelText}>Close</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-
-        {/* Instructions */}
-        <View style={styles.instructionRow}>
-          <Ionicons name="information-circle" size={18} color="#1e5a8e" />
-          <Text style={styles.instructionText}>  Please provide details about the leak</Text>
         </View>
 
         {/* Leak Type */}
@@ -580,6 +543,19 @@ const LeakReportFormScreen = observer(({ route, navigation }) => {
     </SafeAreaView>
   );
 });
+
+// Wrapper to extract route params before passing to observer component
+const LeakReportFormScreen = ({ navigation, route }) => {
+  const { meterData, coordinates, fromNearest } = route?.params || {};
+  return (
+    <LeakReportFormScreenInner 
+      navigation={navigation} 
+      meterData={meterData}
+      coordinates={coordinates}
+      fromNearest={fromNearest}
+    />
+  );
+};
 
 export default LeakReportFormScreen;
 

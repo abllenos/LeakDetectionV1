@@ -2,12 +2,14 @@ import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, StatusBar, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import MapView, { UrlTile, Marker } from 'react-native-maps';
+import MapView, { Marker } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle, Polygon, Text as SvgText } from 'react-native-svg';
 import { ActivityIndicator } from 'react-native';
 import { observer } from 'mobx-react-lite';
+import { toJS } from 'mobx';
 import { useNearestMetersStore } from '../stores/RootStore';
+import OfflineTile from '../components/OfflineTile';
 
 // Default map tile source (OpenStreetMap)
 const TILE_SOURCES = [
@@ -16,8 +18,7 @@ const TILE_SOURCES = [
   }
 ];
 
-const NearestMetersScreen = observer(function NearestMetersScreen({ navigation, route }) {
-  const { coordinates } = route.params || {};
+const NearestMetersScreenInner = observer(function NearestMetersScreenInner({ navigation, coordinates }) {
   const mapRef = useRef(null);
   const store = useNearestMetersStore();
 
@@ -69,7 +70,7 @@ const NearestMetersScreen = observer(function NearestMetersScreen({ navigation, 
         }}
         showsUserLocation
       >
-        <UrlTile
+        <OfflineTile
           urlTemplate={TILE_SOURCES[0].url}
           maximumZ={19}
           tileSize={256}
@@ -100,13 +101,13 @@ const NearestMetersScreen = observer(function NearestMetersScreen({ navigation, 
         {store.dragMode && store.pinReady && store.dragPin && (
           <Marker
             key="drag-pin"
-            coordinate={store.dragPin}
+            coordinate={toJS(store.dragPin)}
             draggable={true}
             pinColor="#3b82f6"
             title={'Drag to set location'}
             onDragEnd={e => {
-              store.confirmPinDrag(e.nativeEvent.coordinate);
-              Alert.alert('Location Confirmed', 'You can now proceed to report the leak.');
+              // Just update the position, don't confirm yet
+              store.setDragPin(e.nativeEvent.coordinate);
             }}
             onDrag={e => store.setDragPin(e.nativeEvent.coordinate)}
           />
@@ -209,10 +210,78 @@ const NearestMetersScreen = observer(function NearestMetersScreen({ navigation, 
             </TouchableOpacity>
           </View>
         )}
+        {/* Panel when drag pin is ready - show confirm button */}
+        {store.dragMode && store.pinReady && store.dragPin && (
+          <View style={{ alignItems: 'center', paddingVertical: 24, backgroundColor: '#f0fdf4' }}>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: '#0f172a', marginBottom: 10 }}>Drag the Blue Pin</Text>
+            <Text style={{ fontSize: 14, color: '#64748b', marginBottom: 8, textAlign: 'center' }}>
+              Drag the blue pin to the exact leak location, then confirm.
+            </Text>
+            <Text style={{ fontSize: 12, color: '#10b981', marginBottom: 18, textAlign: 'center' }}>
+              dragMode: {store.dragMode ? 'Yes' : 'No'}, pinReady: {store.pinReady ? 'Yes' : 'No'}, 
+              dragPin: {store.dragPin ? `${store.dragPin.latitude?.toFixed(6)}, ${store.dragPin.longitude?.toFixed(6)}` : 'None'}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <TouchableOpacity
+                style={{
+                  backgroundColor: '#64748b',
+                  borderRadius: 24,
+                  paddingHorizontal: 20,
+                  paddingVertical: 12,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                }}
+                onPress={() => {
+                  store.setDragMode(false);
+                  store.setPinReady(false);
+                  store.setDragPin(null);
+                }}
+              >
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{
+                  backgroundColor: '#10b981',
+                  borderRadius: 24,
+                  paddingHorizontal: 24,
+                  paddingVertical: 12,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                }}
+                onPress={() => {
+                  console.log('Confirm button pressed');
+                  if (store.dragPin) {
+                    const coords = toJS(store.dragPin);
+                    console.log('Navigating to LeakReportForm with coords:', coords);
+                    navigation.navigate('LeakReportForm', {
+                      meterData: null,
+                      coordinates: {
+                        latitude: coords.latitude,
+                        longitude: coords.longitude,
+                      },
+                      fromNearest: false,
+                    });
+                  } else {
+                    console.log('No drag pin set');
+                  }
+                }}
+              >
+                <Ionicons name="checkmark" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>Confirm Location</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
       </View>
     </View>
   );
 });
+
+// Wrapper to extract route params before passing to observer component
+const NearestMetersScreen = ({ navigation, route }) => {
+  const { coordinates } = route.params || {};
+  return <NearestMetersScreenInner navigation={navigation} coordinates={coordinates} />;
+};
 
 export default NearestMetersScreen;
 

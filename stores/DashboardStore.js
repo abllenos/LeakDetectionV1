@@ -1,31 +1,17 @@
 import { makeObservable, observable, action, computed, runInAction, toJS } from 'mobx';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchLeakReports } from '../services/interceptor';
-import { fetchNotifications } from '../services/notifications';
 
 class DashboardStore {
-  notifModalVisible = false;
-  _notificationsArray = [];
-  unreadCount = 0;
   leakReportsData = null;
   loadingReports = true;
   userData = { name: 'User', avatar: 'U' };
 
   constructor() {
     makeObservable(this, {
-      notifModalVisible: observable,
-      _notificationsArray: observable,
-      unreadCount: observable,
       leakReportsData: observable,
       loadingReports: observable,
       userData: observable,
-      notifications: computed,
-      setNotifModalVisible: action.bound,
-      toggleNotifModal: action.bound,
-      setNotifications: action.bound,
-      markAllAsRead: action.bound,
-      markNotificationAsRead: action.bound,
-      loadNotifications: action.bound,
       loadUserData: action.bound,
       loadLeakReports: action.bound,
       totalReports: computed,
@@ -40,64 +26,6 @@ class DashboardStore {
       userAvatar: computed,
       recentReports: computed,
     });
-  }
-
-  // Computed property that returns plain JavaScript array
-  get notifications() {
-    return toJS(this._notificationsArray);
-  }
-
-  // Actions
-  setNotifModalVisible(visible) {
-    this.notifModalVisible = visible;
-  }
-
-  toggleNotifModal() {
-    this.notifModalVisible = !this.notifModalVisible;
-  }
-
-  setNotifications(notifications) {
-    this._notificationsArray = notifications;
-    this.unreadCount = notifications.filter(n => !n.read).length;
-  }
-
-  markAllAsRead() {
-    this._notificationsArray = this._notificationsArray.map(n => ({ ...n, read: true }));
-    this.unreadCount = 0;
-  }
-
-  async markNotificationAsRead(notificationId) {
-    try {
-      const STORAGE_KEY = 'app_notifications';
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      const list = raw ? JSON.parse(raw) : [];
-      
-      const updatedList = list.map(n => 
-        n.id === notificationId ? { ...n, read: true } : n
-      );
-      
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedList));
-      
-      runInAction(() => {
-        this._notificationsArray = updatedList;
-        this.unreadCount = updatedList.filter(n => !n.read).length;
-      });
-    } catch (error) {
-      console.error('Failed to mark notification as read:', error);
-    }
-  }
-
-  async loadNotifications() {
-    try {
-      const list = await fetchNotifications();
-      
-      runInAction(() => {
-        this._notificationsArray = list;
-        this.unreadCount = list.filter(n => !n.read).length;
-      });
-    } catch (error) {
-      console.error('Failed to load notifications:', error);
-    }
   }
 
   async loadUserData() {
@@ -213,9 +141,6 @@ class DashboardStore {
   }
 
   reset() {
-    this.notifModalVisible = false;
-    this._notificationsArray = [];
-    this.unreadCount = 0;
     this.leakReportsData = null;
     this.loadingReports = true;
   }

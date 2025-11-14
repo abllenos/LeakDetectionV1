@@ -30,6 +30,7 @@ class AuthStore {
       handleLogin: action,
       handleLogout: action,
       loadSavedCredentials: action,
+      checkAutoLogin: action,
     });
   }
 
@@ -54,10 +55,6 @@ class AuthStore {
     this.focusedField = field;
   }
 
-  setFocusedField(field) {
-    this.focusedField = field;
-  }
-
   async loadSavedCredentials() {
     try {
       const [savedUserId, savedPassword, remembered] = await Promise.all([
@@ -78,10 +75,37 @@ class AuthStore {
     }
   }
 
+  async checkAutoLogin() {
+    try {
+      console.log('[AuthStore] Checking for auto-login...');
+      const [token, userData] = await Promise.all([
+        AsyncStorage.getItem('token'),
+        AsyncStorage.getItem('userData'),
+      ]);
+
+      if (token && userData) {
+        console.log('[AuthStore] Valid token found, auto-login successful');
+        runInAction(() => {
+          this.userData = JSON.parse(userData);
+          this.isAuthenticated = true;
+        });
+        return true;
+      } else {
+        console.log('[AuthStore] No valid token found');
+        return false;
+      }
+    } catch (error) {
+      console.error('[AuthStore] Auto-login check error:', error);
+      return false;
+    }
+  }
+
   async handleLogin() {
     this.loading = true;
     try {
+      console.log('[AuthStore] Starting login...');
       const userData = await login(this.userId, this.password);
+      console.log('[AuthStore] Login API successful, userData:', userData);
       
       runInAction(() => {
         this.userData = userData;
@@ -99,9 +123,13 @@ class AuthStore {
         await AsyncStorage.multiRemove(['rememberedUserId', 'rememberedPassword', 'rememberMe']);
       }
 
+      // Small delay to ensure AsyncStorage writes complete
+      await new Promise(resolve => setTimeout(resolve, 100));
+      console.log('[AuthStore] Login completed successfully');
+      
       return true;
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('[AuthStore] Login error:', error);
       throw error;
     } finally {
       runInAction(() => {

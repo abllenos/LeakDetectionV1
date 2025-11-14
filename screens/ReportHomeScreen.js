@@ -1,13 +1,16 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, StatusBar, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import MapView, { UrlTile } from 'react-native-maps';
+import MapView from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import { observer } from 'mobx-react-lite';
+import { toJS } from 'mobx';
 import { useReportMapStore } from '../stores/RootStore';
+import OfflineTile from '../components/OfflineTile';
 
-const ReportHomeScreen = observer(({ navigation, route }) => {
+// Component wrapped with observer - navigation/route props extracted to prevent MobX observation
+const ReportHomeScreenInner = observer(({ navigation, params }) => {
   const store = useReportMapStore();
   const mapRef = useRef(null);
   
@@ -26,7 +29,7 @@ const ReportHomeScreen = observer(({ navigation, route }) => {
 
   // Handle params when navigated back from NearestMeters
   useEffect(() => {
-    const sel = route?.params?.selectedMeter;
+    const sel = params?.selectedMeter;
     if (sel) {
       const nextRegion = store.handleSelectedMeter(sel);
       if (nextRegion) {
@@ -34,19 +37,19 @@ const ReportHomeScreen = observer(({ navigation, route }) => {
       }
       navigation.setParams({ selectedMeter: null });
     }
-  }, [route?.params]);
+  }, [params]);
 
   // If another screen requested nearest-meter flow, forward to FindNearest
   useEffect(() => {
-    const nearestReq = route?.params?.nearestRequest;
-    const coords = route?.params?.coordinates;
+    const nearestReq = params?.nearestRequest;
+    const coords = params?.coordinates;
     if (nearestReq) {
       // Clear param to avoid loops
       navigation.setParams({ nearestRequest: null, coordinates: null });
       // Forward to FindNearest with coordinates (if provided) so it can perform location-based search
       navigation.navigate('FindNearest', { coordinates: coords });
     }
-  }, [route?.params]);
+  }, [params]);
 
   const searchMeter = async () => {
     if (!store.meterNumber || store.meterNumber.trim() === '') {
@@ -70,74 +73,139 @@ const ReportHomeScreen = observer(({ navigation, route }) => {
         <View style={styles.headerLeft}>
           <View style={{ width: 44 }} />
           <View>
-            <Text style={styles.headerTitle}>Report & Map</Text>
-            <Text style={styles.headerSubtitle}>Search meters and find leaks</Text>
+            <Text style={styles.headerTitle}>Report Leak</Text>
+            <Text style={styles.headerSubtitle}>Choose how to report</Text>
           </View>
         </View>
         <View style={{ width: 44 }} />
       </LinearGradient>
 
-      <View style={styles.mapWrap}>
-        <MapView ref={mapRef} style={styles.map} initialRegion={store.region} showsUserLocation>
-          <UrlTile urlTemplate={TILE_SOURCES[store.tileIndex].url} maximumZ={19} tileSize={256} zIndex={0} />
-        </MapView>
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+        <View style={styles.mapWrap}>
+          <MapView ref={mapRef} style={styles.map} initialRegion={toJS(store.region)} showsUserLocation>
+            <OfflineTile urlTemplate={TILE_SOURCES[store.tileIndex].url} maximumZ={19} tileSize={256} zIndex={0} />
+          </MapView>
 
-        <View style={styles.searchOverlay}>
-          <View style={styles.searchInputWrap}>
-            <Ionicons name="search" size={18} color="#9aa5b1" style={{ marginRight: 8 }} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Enter meter number..."
-              placeholderTextColor="#9aa5b1"
-              value={store.meterNumber}
-              onChangeText={store.setMeterNumber}
-              returnKeyType="search"
-              onSubmitEditing={searchMeter}
-              editable={!store.searching}
-            />
+          <View style={styles.searchOverlay}>
+            <View style={styles.searchInputWrap}>
+              <Ionicons name="search" size={18} color="#9aa5b1" style={{ marginRight: 8 }} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Enter meter number..."
+                placeholderTextColor="#9aa5b1"
+                value={store.meterNumber}
+                onChangeText={store.setMeterNumber}
+                returnKeyType="search"
+                onSubmitEditing={searchMeter}
+                editable={!store.searching}
+              />
+            </View>
+            <TouchableOpacity 
+              style={[styles.searchBtn, store.searching && styles.searchBtnDisabled]} 
+              onPress={searchMeter} 
+              disabled={store.searching}
+            >
+              {store.searching ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.searchBtnText}>Search</Text>
+              )}
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity 
-            style={[styles.searchBtn, store.searching && styles.searchBtnDisabled]} 
-            onPress={searchMeter} 
-            disabled={store.searching}
+        </View>
+
+        <View style={styles.optionsSection}>
+          <Text style={styles.sectionTitle}>Report Options</Text>
+          <Text style={styles.sectionSubtitle}>Choose the best way to report the leak location</Text>
+
+          {/* Report Nearest Meter */}
+          <TouchableOpacity
+            style={styles.optionCard}
+            onPress={() => navigation.navigate('FindNearest')}
+            activeOpacity={0.7}
           >
-            {store.searching ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={styles.searchBtnText}>Search</Text>
-            )}
+            <View style={[styles.optionIconWrap, { backgroundColor: '#eff6ff' }]}>
+              <Ionicons name="navigate" size={28} color="#1e5a8e" />
+            </View>
+            <View style={styles.optionContent}>
+              <Text style={styles.optionTitle}>Report Nearest Meter</Text>
+              <Text style={styles.optionDescription}>
+                Find the 3 closest meters to your location and select one
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color="#cbd5e1" />
+          </TouchableOpacity>
+
+          {/* Use Current Location */}
+          <TouchableOpacity
+            style={styles.optionCard}
+            onPress={() => navigation.navigate('ReportMap', { useCurrentLocation: true })}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.optionIconWrap, { backgroundColor: '#f0fdf4' }]}>
+              <Ionicons name="location" size={28} color="#10b981" />
+            </View>
+            <View style={styles.optionContent}>
+              <Text style={styles.optionTitle}>Use Current Location</Text>
+              <Text style={styles.optionDescription}>
+                Report the leak at your current GPS position
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color="#cbd5e1" />
+          </TouchableOpacity>
+
+          {/* Drag Pin on Map */}
+          <TouchableOpacity
+            style={styles.optionCard}
+            onPress={() => navigation.navigate('ReportMap', { useDragPin: true })}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.optionIconWrap, { backgroundColor: '#eff6ff' }]}>
+              <Ionicons name="pin" size={28} color="#3b82f6" />
+            </View>
+            <View style={styles.optionContent}>
+              <Text style={styles.optionTitle}>Drag Pin on Map</Text>
+              <Text style={styles.optionDescription}>
+                Manually place a pin on the map by dragging
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color="#cbd5e1" />
           </TouchableOpacity>
         </View>
-      </View>
-
-      <View style={styles.buttonWrap}>
-        <TouchableOpacity
-          style={styles.primaryBtnLarge}
-          onPress={() => navigation.navigate('FindNearest')}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="navigate" size={20} color="#fff" style={{ marginRight: 8 }} />
-          <Text style={styles.primaryBtnTextLarge}>Report Nearest Meter</Text>
-        </TouchableOpacity>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 });
+
+// Wrapper to extract route params before passing to observer component
+const ReportHomeScreen = ({ navigation, route }) => {
+  // Extract params to prevent MobX from trying to observe route object
+  const params = route?.params || {};
+  return <ReportHomeScreenInner navigation={navigation} params={params} />;
+};
 
 export default ReportHomeScreen;
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#f0f4f8' },
+  scrollView: { flex: 1 },
+  scrollContent: { paddingBottom: 24 },
   header: { paddingHorizontal: 20, paddingVertical: 16, paddingTop: 50 },
-  headerTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  headerSubtitle: { color: 'rgba(255,255,255,0.9)', fontSize: 12, marginTop: 4 },
-  mapWrap: { height: 420, backgroundColor: '#ddd', marginTop: 16 },
+  headerLeft: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    flex: 1, 
+    justifyContent: 'center' 
+  },
+  headerTitle: { color: '#fff', fontSize: 20, fontWeight: '700', textAlign: 'center' },
+  headerSubtitle: { color: 'rgba(255,255,255,0.9)', fontSize: 13, marginTop: 2, textAlign: 'center' },
+  mapWrap: { height: 300, backgroundColor: '#ddd', marginHorizontal: 16, marginTop: 16, borderRadius: 16, overflow: 'hidden' },
   map: { ...StyleSheet.absoluteFillObject },
   searchOverlay: { 
     position: 'absolute', 
-    top: 10, 
-    left: 16, 
-    right: 16, 
+    top: 12, 
+    left: 12, 
+    right: 12, 
     flexDirection: 'row', 
     alignItems: 'center' 
   },
@@ -148,28 +216,79 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff', 
     borderRadius: 12, 
     paddingHorizontal: 12, 
-    height: 44 
+    height: 44,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  searchInput: { flex: 1, color: '#333' },
+  searchInput: { flex: 1, color: '#333', fontSize: 15 },
   searchBtn: { 
     marginLeft: 10, 
-    backgroundColor: '#e6eef6', 
-    height: 44, 
-    paddingHorizontal: 14, 
-    borderRadius: 12, 
-    alignItems: 'center', 
-    justifyContent: 'center' 
-  },
-  searchBtnDisabled: { backgroundColor: '#cbd5e1', opacity: 0.6 },
-  searchBtnText: { color: '#1e5a8e', fontWeight: '700' },
-  buttonWrap: { padding: 20 },
-  primaryBtnLarge: { 
     backgroundColor: '#1e5a8e', 
-    paddingVertical: 16, 
+    height: 44, 
+    paddingHorizontal: 18, 
     borderRadius: 12, 
     alignItems: 'center', 
     justifyContent: 'center',
-    flexDirection: 'row',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  primaryBtnTextLarge: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  searchBtnDisabled: { backgroundColor: '#cbd5e1', opacity: 0.6 },
+  searchBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  
+  optionsSection: {
+    paddingHorizontal: 16,
+    paddingTop: 24,
+  },
+  sectionTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginBottom: 6,
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: '#64748b',
+    marginBottom: 20,
+  },
+  optionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  optionIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+  },
+  optionContent: {
+    flex: 1,
+  },
+  optionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginBottom: 4,
+  },
+  optionDescription: {
+    fontSize: 13,
+    color: '#64748b',
+    lineHeight: 18,
+  },
 });

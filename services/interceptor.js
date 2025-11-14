@@ -122,21 +122,35 @@ export const searchAccountOrMeter = async (searchValue) => {
 export const getAvailableCustomers = async () => {
   try {
     const chunkCount = await AsyncStorage.getItem('allCustomers_chunks');
+    console.log('📦 Checking customer data - chunk count:', chunkCount);
+    
     if (chunkCount) {
       const chunks = parseInt(chunkCount);
+      console.log(`📦 Loading ${chunks} chunks...`);
       let allCustomers = [];
       for (let i = 0; i < chunks; i++) {
         const chunk = await AsyncStorage.getItem(`allCustomers_chunk_${i}`);
         if (chunk) {
-          allCustomers = allCustomers.concat(JSON.parse(chunk));
+          const parsedChunk = JSON.parse(chunk);
+          console.log(`📦 Chunk ${i}: ${parsedChunk.length} records`);
+          allCustomers = allCustomers.concat(parsedChunk);
+        } else {
+          console.log(`⚠️ Chunk ${i} is missing`);
         }
       }
       if (allCustomers.length > 0) {
-        console.log(`📦 Loaded ${allCustomers.length} customers from completed chunks`);
+        console.log(`📦 Loaded ${allCustomers.length} customers from ${chunks} chunks`);
         return allCustomers;
+      } else {
+        console.log('⚠️ Chunks exist but no data loaded');
       }
     }
+    
     const manifest = await AsyncStorage.getItem('allCustomers_manifest');
+    const downloadCount = await AsyncStorage.getItem('allCustomers_download_count');
+    console.log('📦 Manifest:', manifest ? 'exists' : 'none');
+    console.log('📦 Download count:', downloadCount);
+    
     if (manifest) {
       const manifestData = JSON.parse(manifest);
       const pagesFetched = Array.isArray(manifestData.pagesFetched) ? manifestData.pagesFetched : [];
@@ -229,9 +243,202 @@ export const checkForNewData = async () => {
 };
 
 export const fetchAllCustomers = async (forceRefresh = false, onProgress = null, opts = {}) => {
-  // ...existing code from api.js fetchAllCustomers...
-  // For brevity, you may want to copy the full implementation from your previous api.js file here.
-  // If you want the full function, let me know!
+  const BATCH_SIZE = 5000; // Download 5000 records per batch
+  const CHUNK_SIZE = 10000; // Save to AsyncStorage every 10,000 records
+  const API_URL = 'https://dev-api.davao-water.gov.ph/dcwd-gis/api/v1/admin/customer/all';
+  
+  try {
+    console.log('📥 Starting batched customer data download...');
+    
+    // Check if user is authenticated
+    const token = await AsyncStorage.getItem('token');
+    if (!token) {
+      throw new Error('Authentication required. Please log in first.');
+    }
+    
+    // Check if we already have cached data and not forcing refresh
+    if (!forceRefresh) {
+      const cachedCount = await AsyncStorage.getItem('allCustomers_count');
+      if (cachedCount) {
+        console.log('✅ Using cached customer data:', cachedCount, 'records');
+        return true;
+      }
+    }
+    
+    // Initialize download
+    let currentChunkData = []; // Only hold current chunk in memory
+    let currentChunkIndex = 0;
+    let totalRecords = 0;
+    let currentPage = 1;
+    let hasMore = true;
+    
+    // Mark download as in progress
+    await safeSetItem('allCustomers_manifest', JSON.stringify({
+      status: 'in-progress',
+      startedAt: new Date().toISOString(),
+      batchSize: BATCH_SIZE,
+    }));
+    
+    while (hasMore) {
+      try {
+        console.log(`📦 Fetching batch ${currentPage} (offset: ${(currentPage - 1) * BATCH_SIZE})...`);
+        
+        // Fetch batch from API with pagination
+        const response = await devApi.get(API_URL, {
+          params: {
+            limit: BATCH_SIZE,
+            offset: (currentPage - 1) * BATCH_SIZE,
+            page: currentPage,
+          },
+          timeout: 60000, // 60 second timeout per batch
+        });
+        
+        const batchData = response?.data?.data || response?.data || [];
+        const records = Array.isArray(batchData) ? batchData : (batchData.records || batchData.customers || []);
+        
+        console.log(`✅ Batch ${currentPage} received: ${records.length} records`);
+        console.log(`📊 Response structure:`, {
+          hasData: !!response?.data?.data,
+          hasRecords: !!batchData?.records,
+          hasCustomers: !!batchData?.customers,
+          isArray: Array.isArray(batchData),
+          totalInResponse: response?.data?.total || response?.data?.count || 'unknown',
+          sampleRecord: records[0] ? Object.keys(records[0]).join(', ') : 'none'
+        });
+        
+        if (records.length === 0) {
+          hasMore = false;
+          console.log('📊 No more records to fetch');
+          break;
+        }
+        
+        // Check if API might be ignoring pagination (returning all data every time)
+        if (currentPage === 1 && records.length > 100000) {
+          console.warn('⚠️ API returned very large dataset on first request. It may not support pagination.');
+          console.log(`📊 Total records in first response: ${records.length}`);
+          // Save all data as chunks and exit
+          let chunkIndex = 0;
+          for (let i = 0; i < records.length; i += CHUNK_SIZE) {
+            const chunk = records.slice(i, i + CHUNK_SIZE);
+            console.log(`💾 Saving chunk ${chunkIndex} (${chunk.length} records)...`);
+            await safeSetItem(
+              `allCustomers_chunk_${chunkIndex}`,
+              JSON.stringify(chunk)
+            );
+            chunkIndex++;
+          }
+          totalRecords = records.length;
+          await safeSetItem('allCustomers_chunks', chunkIndex.toString());
+          await safeSetItem('allCustomers_count', totalRecords.toString());
+          await safeSetItem('allCustomers_timestamp', new Date().toISOString());
+          await safeSetItem('allCustomers_manifest', JSON.stringify({
+            status: 'complete',
+            completedAt: new Date().toISOString(),
+            totalRecords,
+            note: 'API returned all data in single response'
+          }));
+          console.log('💾 Customer data cached successfully');
+          return true;
+        }
+        
+        // Add to current chunk
+        currentChunkData = currentChunkData.concat(records);
+        totalRecords += records.length;
+        
+        // Save chunk when it reaches 10,000 records or if this is the last batch
+        if (currentChunkData.length >= CHUNK_SIZE || records.length < BATCH_SIZE) {
+          console.log(`💾 Saving chunk ${currentChunkIndex} (${currentChunkData.length} records)...`);
+          await safeSetItem(
+            `allCustomers_chunk_${currentChunkIndex}`,
+            JSON.stringify(currentChunkData)
+          );
+          currentChunkIndex++;
+          currentChunkData = []; // Clear memory
+        }
+        
+        // Update download count for UI
+        await safeSetItem('allCustomers_download_count', totalRecords.toString());
+        
+        // Report progress
+        if (onProgress) {
+          onProgress({
+            current: totalRecords,
+            batch: currentPage,
+            batchSize: records.length,
+            percentage: Math.min(100, Math.round((currentPage * BATCH_SIZE) / (totalRecords + BATCH_SIZE) * 100)),
+          });
+        }
+        
+        // Check if we received less than batch size (indicates last page)
+        if (records.length < BATCH_SIZE) {
+          hasMore = false;
+          console.log('📊 Last batch received (partial)');
+        } else {
+          currentPage++;
+          // Small delay between batches to avoid overwhelming the server
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        
+      } catch (batchError) {
+        console.error(`❌ Error fetching batch ${currentPage}:`, batchError.message);
+        
+        // If it's a network error and we have some data, save current chunk and stop gracefully
+        if (totalRecords > 0) {
+          console.warn('⚠️ Stopping download due to error, saving partial data...');
+          if (currentChunkData.length > 0) {
+            await safeSetItem(
+              `allCustomers_chunk_${currentChunkIndex}`,
+              JSON.stringify(currentChunkData)
+            );
+            currentChunkIndex++;
+          }
+          hasMore = false;
+        } else {
+          throw batchError; // Rethrow if we have no data at all
+        }
+      }
+    }
+    
+    console.log(`✅ Download complete: ${totalRecords} total customers downloaded`);
+    
+    // Save final metadata
+    await safeSetItem('allCustomers_chunks', currentChunkIndex.toString());
+    await safeSetItem('allCustomers_count', totalRecords.toString());
+    await safeSetItem('allCustomers_timestamp', new Date().toISOString());
+    
+    // Update manifest as complete
+    await safeSetItem('allCustomers_manifest', JSON.stringify({
+      status: 'complete',
+      completedAt: new Date().toISOString(),
+      totalRecords,
+      batchSize: BATCH_SIZE,
+      batches: currentPage,
+    }));
+    
+    console.log('💾 Customer data cached successfully');
+    return true;
+    
+  } catch (error) {
+    console.error('❌ fetchAllCustomers error:', error.message || error);
+    
+    // Mark as failed in manifest
+    await safeSetItem('allCustomers_manifest', JSON.stringify({
+      status: 'failed',
+      failedAt: new Date().toISOString(),
+      error: error.message,
+    }));
+    
+    // Provide user-friendly error messages
+    if (error.response?.status === 401) {
+      throw new Error('Session expired. Please log out and log in again.');
+    } else if (error.message?.includes('Authentication required')) {
+      throw error;
+    } else if (isStorageFullError(error)) {
+      throw new Error('Storage is full. Please clear some space and try again.');
+    }
+    
+    throw error;
+  }
 };
 
 export const preCacheCustomers = async (onProgress = null, opts = {}) => {
@@ -299,6 +506,13 @@ export const fetchLeakReports = async (empId) => {
     });
     const responseData = res?.data?.data || res?.data || {};
     console.log('✅ Full API Response:', JSON.stringify(res.data, null, 2));
+    
+    // Debug: Log first report structure to find coordinate fields
+    if (responseData.reports && responseData.reports.length > 0) {
+      console.log('📍 First report keys:', Object.keys(responseData.reports[0]));
+      console.log('📍 First report full data:', JSON.stringify(responseData.reports[0], null, 2));
+    }
+    
     console.log('✅ Leak reports fetched:', {
       totalCount: responseData.totalCount || 0,
       reportedCount: responseData.reportedCount || 0,

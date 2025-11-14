@@ -7,6 +7,7 @@ import LeakReportStore from './LeakReportStore';
 import NearestMetersStore from './NearestMetersStore';
 import { ReportMapStore } from './ReportMapStore';
 import { SettingsStore } from './SettingsStore';
+import OfflineStore from './OfflineStore';
 
 class RootStore {
   constructor() {
@@ -18,6 +19,7 @@ class RootStore {
     this.nearestMetersStore = new NearestMetersStore();
     this.reportMapStore = new ReportMapStore();
     this.settingsStore = new SettingsStore();
+    this.offlineStore = new OfflineStore();
   }
 
   reset() {
@@ -29,6 +31,7 @@ class RootStore {
     this.nearestMetersStore.reset();
     this.reportMapStore.reset();
     this.settingsStore.reset();
+    // Don't reset offline store to preserve queue
   }
 }
 
@@ -56,6 +59,7 @@ export const useLeakReportStore = () => useStores().leakReportStore;
 export const useNearestMetersStore = () => useStores().nearestMetersStore;
 export const useReportMapStore = () => useStores().reportMapStore;
 export const useSettingsStore = () => useStores().settingsStore;
+export const useOfflineStore = () => useStores().offlineStore;
 
 export { StoreContext, rootStore };
 export default RootStore;
