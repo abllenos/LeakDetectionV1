@@ -35,13 +35,13 @@ const NearestMetersScreenInner = observer(function NearestMetersScreenInner({ na
 
   const handleMeterSelect = (meter) => {
     store.setSelectedMeter(meter);
-    navigation.navigate('LeakReportForm', {
-      meterData: {
-        meterNumber: meter.id,
+    // Navigate to ReportScreen (map view) with meter details instead of form
+    navigation.navigate('ReportMap', {
+      meterNumber: meter.id || meter.meterId,
+      prefilledData: {
         accountNumber: meter.accountNumber,
         address: meter.address,
-      },
-      coordinates: {
+        dma: meter.dma,
         latitude: meter.latitude,
         longitude: meter.longitude,
       },
@@ -77,26 +77,51 @@ const NearestMetersScreenInner = observer(function NearestMetersScreenInner({ na
           zIndex={0}
         />
 
-        {/* Markers for nearest meters */}
-        {store.nearestMeters.map((meter, idx) => (
-          <Marker
-            key={`marker-${idx}-${meter.id}`}
-            coordinate={{ latitude: meter.latitude, longitude: meter.longitude }}
-            onPress={() => handleMeterSelect(meter)}
-            anchor={{ x: 0.5, y: 1 }}
-          >
-            <View style={styles.markerContainer}>
-              <Svg width={36} height={36} viewBox="0 0 36 36">
-                {/* outer translucent ring */}
-                <Circle cx="18" cy="18" r="12" fill={getBadgeColor(idx)} opacity="0.18" />
-                {/* solid inner circle */}
-                <Circle cx="18" cy="18" r="6" fill={getBadgeColor(idx)} />
-                {/* tiny center highlight */}
-                <Circle cx="18" cy="18" r="2" fill="#ffffff" opacity="0.18" />
-              </Svg>
-            </View>
-          </Marker>
-        ))}
+        {/* Markers for nearest meters - Top 3 shown as pin markers */}
+        {store.nearestMeters.map((meter, idx) => {
+          console.log(`Marker ${idx + 1}:`, meter.id, 'at', meter.latitude, meter.longitude);
+          // Add small offset to make stacked markers visible
+          // Offset in a circular pattern around the original position
+          const offsetLat = idx === 0 ? 0 : (Math.cos((idx - 1) * Math.PI) * 0.0001);
+          const offsetLng = idx === 0 ? 0 : (Math.sin((idx - 1) * Math.PI) * 0.0001);
+          
+          return (
+            <Marker
+              key={`marker-${idx}-${meter.id}`}
+              coordinate={{ 
+                latitude: meter.latitude + offsetLat, 
+                longitude: meter.longitude + offsetLng 
+              }}
+              onPress={() => handleMeterSelect(meter)}
+              anchor={{ x: 0.5, y: 1 }}
+              zIndex={1000 - idx}
+            >
+              <View style={styles.markerContainer}>
+                <Svg width={40} height={50} viewBox="0 0 40 50">
+                  {/* Pin drop shape */}
+                  <Polygon 
+                    points="20,2 35,17 35,22 25,22 20,50 15,22 5,22 5,17" 
+                    fill={getBadgeColor(idx)} 
+                    stroke="#fff"
+                    strokeWidth="2"
+                  />
+                  {/* Rank number badge on pin */}
+                  <Circle cx="20" cy="12" r="8" fill="#fff" />
+                  <SvgText
+                    x="20"
+                    y="17"
+                    fontSize="12"
+                    fontWeight="700"
+                    fill={getBadgeColor(idx)}
+                    textAnchor="middle"
+                  >
+                    {idx + 1}
+                  </SvgText>
+                </Svg>
+              </View>
+            </Marker>
+          );
+        })}
         {/* Pinpoint drag marker: only show when dragMode is true */}
         {store.dragMode && store.pinReady && store.dragPin && (
           <Marker
@@ -308,10 +333,10 @@ const styles = StyleSheet.create({
   headerTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
   headerSubtitle: { color: 'rgba(255,255,255,0.9)', fontSize: 12, marginTop: 2 },
   markerContainer: { 
-    width: 36,
-    height: 36,
+    width: 40,
+    height: 50,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
   },
   markerBadge: {
     width: 44,

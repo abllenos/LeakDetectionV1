@@ -2,18 +2,51 @@ import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Text, TextInput, TouchableOpacity, Modal, Alert, StatusBar, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets, SafeAreaProvider } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import MapView, { Marker, Polyline } from 'react-native-maps';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { observer } from 'mobx-react-lite';
 import { toJS } from 'mobx';
 import { useReportMapStore } from '../stores/RootStore';
-import OfflineTile from '../components/OfflineTile';
+import LeafletMap from '../components/LeafletMap';
 
 const ReportScreenInner = observer(({ navigation, params }) => {
   const insets = useSafeAreaInsets();
   const store = useReportMapStore();
   const mapRef = useRef(null);
   const [routeCoordinates, setRouteCoordinates] = React.useState([]);
+  const [hasError, setHasError] = React.useState(false);
+  const [nearestMeterData, setNearestMeterData] = React.useState(null);
+  
+  // Error boundary effect
+  useEffect(() => {
+    const errorHandler = (error, isFatal) => {
+      console.error('[ReportScreen] Error caught:', error);
+      if (isFatal) {
+        setHasError(true);
+      }
+    };
+    return () => {};
+  }, []);
+
+  if (hasError) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+        <Ionicons name="alert-circle" size={48} color="#ef4444" />
+        <Text style={{ fontSize: 18, fontWeight: 'bold', marginTop: 16 }}>Something went wrong</Text>
+        <Text style={{ textAlign: 'center', marginTop: 8, color: '#666' }}>
+          Please restart the app or contact support if the problem persists.
+        </Text>
+        <TouchableOpacity 
+          style={{ marginTop: 20, backgroundColor: '#2563eb', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8 }}
+          onPress={() => {
+            setHasError(false);
+            navigation.goBack();
+          }}
+        >
+          <Text style={{ color: '#fff', fontWeight: 'bold' }}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
   
   const TILE_SOURCES = [
     { name: 'OSM DE', url: 'https://tile.openstreetmap.de/{z}/{x}/{y}.png', attribution: '© OpenStreetMap contributors' },
@@ -80,9 +113,51 @@ const ReportScreenInner = observer(({ navigation, params }) => {
     const incomingMeter = params?.meterNumber;
     const incomingLat = params?.latitude;
     const incomingLng = params?.longitude;
+    const prefilledData = params?.prefilledData;
+    const fromNearest = params?.fromNearest;
     
+    // Handle incoming from NearestMeters screen with prefilled meter data
+    if (fromNearest && prefilledData) {
+      console.log('📍 Showing meter from NearestMeters:', prefilledData);
+      const reportLocation = {
+        latitude: parseFloat(prefilledData.latitude),
+        longitude: parseFloat(prefilledData.longitude)
+      };
+      
+      // Store meter data in state for later use
+      setNearestMeterData({
+        meterNumber: incomingMeter,
+        accountNumber: prefilledData.accountNumber,
+        address: prefilledData.address,
+        dma: prefilledData.dma,
+        latitude: reportLocation.latitude,
+        longitude: reportLocation.longitude,
+      });
+      
+      // Update store marker to show this location
+      store.updateMarkerAndLabel(reportLocation.latitude, reportLocation.longitude);
+      
+      // Set meter number if provided
+      if (incomingMeter) {
+        store.setMeterNumber(incomingMeter);
+      }
+      
+      // Animate map to this location
+      const nextRegion = {
+        latitude: reportLocation.latitude,
+        longitude: reportLocation.longitude,
+        latitudeDelta: 0.005,
+        longitudeDelta: 0.005
+      };
+      mapRef.current?.animateToRegion(nextRegion, 800);
+      
+      // Clear params to prevent re-triggering
+      try {
+        navigation.setParams({ fromNearest: null, prefilledData: null });
+      } catch (e) { /* noop */ }
+    }
     // Handle incoming from Dashboard "View on Map" with direct coordinates
-    if (incomingLat && incomingLng) {
+    else if (incomingLat && incomingLng) {
       const reportLocation = {
         latitude: parseFloat(incomingLat),
         longitude: parseFloat(incomingLng)
@@ -181,8 +256,14 @@ const ReportScreenInner = observer(({ navigation, params }) => {
 
   const handleMapPress = (e) => {
     if (!store.dragMode) {
-      const { latitude, longitude } = e.nativeEvent.coordinate;
-      store.updateMarkerAndLabel(latitude, longitude);
+      // Handle both react-native-maps format (e.nativeEvent.coordinate) 
+      // and LeafletMap format (direct latitude/longitude)
+      const latitude = e?.nativeEvent?.coordinate?.latitude || e?.latitude;
+      const longitude = e?.nativeEvent?.coordinate?.longitude || e?.longitude;
+      
+      if (latitude && longitude) {
+        store.updateMarkerAndLabel(latitude, longitude);
+      }
     }
   };
 
@@ -216,7 +297,29 @@ const ReportScreenInner = observer(({ navigation, params }) => {
   };
 
   const reportLeak = () => {
-    store.setShowSourceModal(true);
+    // Check if we have stored meter data from NearestMeters
+    if (nearestMeterData) {
+      // Directly navigate to leak form with the meter data
+      const meterData = {
+        meterNumber: nearestMeterData.meterNumber || '',
+        accountNumber: nearestMeterData.accountNumber || '',
+        address: nearestMeterData.address || '',
+      };
+      
+      const coords = {
+        latitude: nearestMeterData.latitude,
+        longitude: nearestMeterData.longitude,
+      };
+      
+      navigation.navigate('LeakReportForm', {
+        meterData,
+        coordinates: coords,
+        fromNearest: true,
+      });
+    } else {
+      // Original behavior - show source modal
+      store.setShowSourceModal(true);
+    }
   };
 
   const handleUseCurrentPinpoint = () => {
@@ -357,68 +460,27 @@ const ReportScreenInner = observer(({ navigation, params }) => {
 
       {/* Map */}
       <View style={styles.mapWrap}>
-        <MapView
-          ref={mapRef}
+        <LeafletMap
+          latitude={store.marker.latitude}
+          longitude={store.marker.longitude}
+          zoom={15}
+          markers={[
+            {
+              latitude: store.marker.latitude,
+              longitude: store.marker.longitude,
+              title: 'Current Location',
+              description: `Lat: ${store.marker.latitude.toFixed(4)}, Lon: ${store.marker.longitude.toFixed(4)}`
+            },
+            ...(store.dragPin ? [{
+              latitude: store.dragPin.latitude,
+              longitude: store.dragPin.longitude,
+              title: store.dragMode ? 'Drag to set location' : 'Selected Location',
+              description: `Lat: ${store.dragPin.latitude.toFixed(4)}, Lon: ${store.dragPin.longitude.toFixed(4)}`
+            }] : [])
+          ]}
+          onMapPress={handleMapPress}
           style={StyleSheet.absoluteFill}
-          initialRegion={toJS(store.region)}
-          onPress={handleMapPress}
-          mapType="none"
-          showsUserLocation
-        >
-          <OfflineTile
-            urlTemplate={TILE_SOURCES[store.tileIndex].url}
-            maximumZ={19}
-            tileSize={256}
-            zIndex={0}
-          />
-
-          {/* Current location marker */}
-          <Marker
-            key="current-location"
-            coordinate={toJS(store.marker)}
-            draggable={false}
-            pinColor="red"
-            title="Current Location"
-            description={`Lat: ${store.marker.latitude.toFixed(4)}, Lon: ${store.marker.longitude.toFixed(4)}`}
-            anchor={{ x: 0.5, y: 1 }}
-          />
-
-          {/* Draggable/Confirmed pin (blue, visible in drag mode and after confirmation) */}
-          {store.dragPin && (
-            <>
-              {/* Smooth curved line connecting red and blue pin */}
-              {routeCoordinates.length > 0 && (
-                <Polyline
-                  coordinates={routeCoordinates}
-                  strokeColor="rgba(59, 130, 246, 0.7)" // semi-transparent blue
-                  strokeWidth={6}
-                />
-              )}
-              <Marker
-                key="drag-pin"
-                coordinate={toJS(store.dragPin)}
-                draggable={true}
-                pinColor="#3b82f6"
-                title={store.dragMode ? 'Drag to set location' : 'Selected Location'}
-                description={`Lat: ${store.dragPin.latitude.toFixed(4)}, Lon: ${store.dragPin.longitude.toFixed(4)}`}
-                anchor={{ x: 0.5, y: 1 }}
-                onDragStart={() => {
-                  console.log('Drag started');
-                }}
-                onDragEnd={(e) => {
-                  // Just update position, don't exit drag mode
-                  const { latitude, longitude } = e.nativeEvent.coordinate;
-                  console.log('Drag ended at:', latitude, longitude);
-                  store.setDragPin({ latitude, longitude });
-                }}
-                onDrag={(e) => {
-                  const { latitude, longitude } = e.nativeEvent.coordinate;
-                  store.setDragPin({ latitude, longitude });
-                }}
-              />
-            </>
-          )}
-        </MapView>
+        />
 
         {/* Source selection modal */}
   <Modal visible={store.showSourceModal} animationType="fade" transparent onRequestClose={() => store.setShowSourceModal(false)}>
@@ -660,6 +722,14 @@ const ReportScreenInner = observer(({ navigation, params }) => {
           <View style={{ flex: 1 }}>
             <Text style={styles.detailLabel}>Address</Text>
             <Text style={styles.detailValue}>{store.currentMeterDetails?.address || 'N/A'}</Text>
+          </View>
+        </View>
+
+        <View style={styles.detailRow}>
+          <Ionicons name="water-outline" size={18} color="#1e3a5f" style={styles.detailIcon} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.detailLabel}>DMA (District Metered Area)</Text>
+            <Text style={styles.detailValue}>{store.currentMeterDetails?.dma || nearestMeterData?.dma || 'N/A'}</Text>
           </View>
         </View>
 

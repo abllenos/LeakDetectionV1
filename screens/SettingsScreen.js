@@ -63,12 +63,6 @@ const SettingsScreen = observer(({ navigation }) => {
     return () => clearInterval(interval);
   }, [store.clientLoading]);
 
-  const cancelClientModal = () => {
-    store.setClientModalVisible(false);
-  };
-
-  // (Download manifest/status removed - handled by Offline Meter Search Data section)
-
   const handleLogout = () => {
     store.setLogoutModalVisible(true);
   };
@@ -110,14 +104,6 @@ const SettingsScreen = observer(({ navigation }) => {
       </LinearGradient>
       
       <ScrollView contentContainerStyle={styles.container}>
-
-        {/* Background download progress banner */}
-        {store.clientLoading ? (
-          <View style={styles.backgroundDownloadBanner}>
-            <Text style={styles.bannerText}>Downloading client data... {store.clientProgress}%</Text>
-          </View>
-        ) : null}
-
 
         {/* Offline Maps Card */}
         <View style={styles.card}>
@@ -278,90 +264,6 @@ const SettingsScreen = observer(({ navigation }) => {
           )}
         </View>
 
-        {/* Offline Meter Search Data */}
-        <View style={styles.card}>
-          <View style={styles.cardHeaderRow}>
-            <Ionicons name="cloud-download" size={18} color="#1e5a8e" />
-            <Text style={styles.cardTitle}>  Offline Meter Search Data</Text>
-          </View>
-
-          <View style={styles.rowBetween}>
-            <View>
-              <Text style={styles.smallLabel}>Status:</Text>
-              <Text style={styles.valueText}>
-                {store.clientLoading && store.isDownloadingUpdate
-                  ? `Updating... (${store.clientRecordCount.toLocaleString()} → downloading new data)`
-                  : store.clientDataAvailable 
-                    ? `Available (${store.clientRecordCount.toLocaleString()} customers)` 
-                    : store.clientLoading
-                      ? `Downloading... (${store.clientRecordCount.toLocaleString()} customers)`
-                      : 'Not available'}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.actionsCol}>
-            <TouchableOpacity style={styles.outlineBtnFull} onPress={store.deleteClientData.bind(store)} disabled={store.clientLoading || !store.clientDataAvailable}>
-              {store.clientLoading && !store.clientDataAvailable ? <ActivityIndicator /> : <Text style={styles.outlineBtnText}>Delete Offline Client Data</Text>}
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={[styles.outlineBtnFull, { borderColor: '#ef4444', marginTop: 8 }]} 
-              onPress={store.clearAllStorageData.bind(store)}
-            >
-              <Text style={[styles.outlineBtnText, { color: '#ef4444' }]}>Clear All Storage Data</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.primaryBtnFull} onPress={store.downloadClientData.bind(store)} disabled={store.clientLoading}>
-              {store.clientLoading ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <ActivityIndicator color="#fff" />
-                  <Text style={styles.primaryBtnText}>
-                    {store.isDownloadingUpdate ? 'Updating...' : 'Downloading...'}
-                  </Text>
-                </View>
-              ) : (
-                <Text style={styles.primaryBtnText}>Download Client Data</Text>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={[styles.secondaryBtnFull, { marginTop: 8 }]} 
-              onPress={store.checkForDataUpdates.bind(store)} 
-              disabled={store.checkingUpdates || store.clientLoading || !store.clientDataAvailable}
-            >
-              {store.checkingUpdates ? (
-                <ActivityIndicator color="#2196F3" />
-              ) : (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Ionicons name="sync" size={18} color={!store.clientDataAvailable ? "#94a3b8" : "#2196F3"} />
-                  <Text style={[styles.secondaryBtnText, !store.clientDataAvailable && { color: '#94a3b8' }]}>
-                    Check for Data Updates
-                  </Text>
-                </View>
-              )}
-            </TouchableOpacity>
-
-            {/* Download preset selector */}
-            <View style={{ marginTop: 12 }}>
-              <Text style={{ color: '#6b7280', marginBottom: 8 }}>Download speed preset</Text>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity onPress={async () => { await store.savePreset('safe'); }} style={[styles.presetBtn, store.downloadPreset === 'safe' ? styles.presetActive : null]}>
-                  <Text style={store.downloadPreset === 'safe' ? styles.presetTextActive : styles.presetText}>Safe</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={async () => { await store.savePreset('normal'); }} style={[styles.presetBtn, store.downloadPreset === 'normal' ? styles.presetActive : null]}>
-                  <Text style={store.downloadPreset === 'normal' ? styles.presetTextActive : styles.presetText}>Normal</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={async () => { await store.savePreset('fast'); }} style={[styles.presetBtn, store.downloadPreset === 'fast' ? styles.presetActive : null]}>
-                  <Text style={store.downloadPreset === 'fast' ? styles.presetTextActive : styles.presetText}>Fast</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* test pagination removed */}
-          </View>
-        </View>
-
         {/* General Settings */}
         <View style={styles.cardLight}>
           <Text style={styles.cardTitle}>General Settings</Text>
@@ -388,94 +290,6 @@ const SettingsScreen = observer(({ navigation }) => {
         <View style={{ height: 80 }} />
       </ScrollView>
 
-      {/* Custom Logout Modal */}
-      {/* Client Delete Confirmation Modal */}
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={store.clientDeleteModalVisible}
-        onRequestClose={() => store.setClientDeleteModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalIconContainer}>
-              <LinearGradient
-                colors={[ '#ef4444', '#f97316' ]}
-                style={styles.modalIconGradient}
-              >
-                <Ionicons name="trash" size={36} color="#fff" />
-              </LinearGradient>
-            </View>
-            <Text style={styles.modalTitle}>Delete Offline Data</Text>
-            <Text style={styles.modalMessage}>This will remove all downloaded client search data. The app will no longer be able to search meters offline.</Text>
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => store.setClientDeleteModalVisible(false)} disabled={store.clientDeleting}>
-                <Text style={styles.modalCancelText}>{store.clientDeleting ? 'Please wait' : 'Cancel'}</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={[styles.modalConfirmBtn, { borderColor: '#ef4444' }]} onPress={store.confirmDeleteClientData.bind(store)} disabled={store.clientDeleting}>
-                <LinearGradient colors={[ '#ef4444', '#f43f5e' ]} style={styles.modalConfirmGradient}>
-                  {store.clientDeleting ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalConfirmText}>Delete</Text>}
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-      {/* Test Pagination Modal removed */}
-      {/* Client Download Modal */}
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={store.clientModalVisible}
-        onRequestClose={cancelClientModal}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.updateModalContainer}>
-            <Text style={styles.modalTitle}>Download Client Data</Text>
-            <Text style={styles.modalMessageSmall}>Download offline client search data to enable meter lookups without network access.</Text>
-
-            <View style={styles.progressWrap}>
-              {!store.clientSuccess ? (
-                <>
-                  <View style={styles.progressBarBackground}>
-                    <View style={[styles.progressBarFill, { width: `${store.clientProgress}%`, backgroundColor: '#10b981' }]} />
-                  </View>
-                  <Text style={styles.progressText}>{store.clientProgress}%</Text>
-                </>
-              ) : (
-                <Text style={styles.successText}>Client data downloaded ✅</Text>
-              )}
-            </View>
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalCancelBtn} onPress={cancelClientModal} disabled={store.clientLoading}>
-                <Text style={styles.modalCancelText}>{store.clientLoading ? 'Please wait' : 'Cancel'}</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalConfirmBtn}
-                onPress={() => {
-                  if (store.clientSuccess) {
-                    // close the modal when user taps Done
-                    store.setClientModalVisible(false);
-                    store.setClientProgress(0);
-                    store.setClientSuccess(false);
-                  } else {
-                    store.startClientDownload();
-                  }
-                }}
-                disabled={store.clientLoading}
-              >
-                <LinearGradient colors={[ '#10b981', '#059669' ]} style={styles.modalConfirmGradient}>
-                  <Text style={styles.modalConfirmText}>{store.clientLoading ? 'Downloading...' : store.clientSuccess ? 'Done' : 'Download'}</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
       {/* Clear Cache Modal */}
       <Modal
         animationType="fade"
@@ -787,19 +601,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backgroundDownloadBanner: {
-    backgroundColor: '#e6fffa',
-    borderLeftWidth: 4,
-    borderLeftColor: '#10b981',
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 12,
-  },
-  bannerText: { color: '#065f46', fontWeight: '700' },
-  presetBtn: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, backgroundColor: '#f1f5f9' },
-  presetActive: { backgroundColor: '#1e5a8e' },
-  presetText: { color: '#64748b', fontWeight: '700' },
-  presetTextActive: { color: '#fff', fontWeight: '700' },
   modalConfirmText: {
     fontSize: 16,
     fontWeight: '700',

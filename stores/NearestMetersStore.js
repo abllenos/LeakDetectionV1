@@ -103,6 +103,7 @@ class NearestMetersStore {
           meterId: it.meterNumber || it.accountNumber || it.id || '',
           accountNumber: it.accountNumber || '',
           address: it.address || '',
+          dma: it.dma || it.DMA || '',
           latitude: lat,
           longitude: lng,
           distance,
@@ -114,20 +115,11 @@ class NearestMetersStore {
         .filter(m => !isNaN(m.latitude) && !isNaN(m.longitude))
         .sort((a, b) => a.distance - b.distance);
 
-      // Filter to 3 unique locations
-      const unique = [];
-      const seen = new Set();
-      for (const meter of sorted) {
-        const key = `${meter.latitude},${meter.longitude}`;
-        if (!seen.has(key)) {
-          unique.push(meter);
-          seen.add(key);
-        }
-        if (unique.length === 3) break;
-      }
+      // Take top 3 nearest meters (allow duplicates at same location)
+      const top3 = sorted.slice(0, 3);
 
       runInAction(() => {
-        this.nearestMeters = unique;
+        this.nearestMeters = top3;
       });
     } catch (err) {
       console.warn('fetchNearest failed', err);

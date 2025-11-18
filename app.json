@@ -9,7 +9,7 @@
       "web"
     ],
     "orientation": "portrait",
-  "icon": "./assets/leak.png",
+  "icon": "./assets/applogoleak.jpeg",
     "updates": {
       "enabled": false
     },
@@ -37,15 +37,15 @@
         "WRITE_EXTERNAL_STORAGE"
       ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/leak.png",
+        "foregroundImage": "./assets/applogoleak.jpeg",
         "backgroundColor": "#ffffff"
+      },
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyDnXXXX-PLACEHOLDER-GET-YOUR-OWN-KEY"
+        }
       }
     },
-    "web": {},
-    "extra": {
-      "eas": {
-        "projectId": "dc7416d6-d011-429f-84c8-03812f11727f"
-      }
-    }
+    "web": {}
   }
 }

@@ -5,7 +5,7 @@ export default {
     version: "1.0.2",
     platforms: ["ios", "android", "web"],
     orientation: "portrait",
-  icon: "./assets/leak.png",
+  icon: "./assets/applogoleak.jpeg",
     updates: {
       enabled: false,
     },
@@ -35,7 +35,7 @@ export default {
         "WRITE_EXTERNAL_STORAGE",
       ],
       adaptiveIcon: {
-        foregroundImage: "./assets/leak.png",
+        foregroundImage: "./assets/applogoleak.jpeg",
         backgroundColor: "#1e5a8e",
       },
       config: {
@@ -47,7 +47,7 @@ export default {
     web: {},
     extra: {
       eas: {
-        projectId: "dc7416d6-d011-429f-84c8-03812f11727f",
+        projectId: "da631ae3-5d6d-4ef3-bc20-498f42ef3993",
       },
     },
     plugins: [

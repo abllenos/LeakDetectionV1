@@ -1,4 +1,5 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from 'expo-file-system';
+import { Directory, Paths, File } from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Tile configuration for Davao City area
@@ -20,7 +21,10 @@ const TILE_SOURCES = {
 };
 
 // Get tile cache directory
-const getTileCacheDir = () => `${FileSystem.cacheDirectory}map_tiles/`;
+const getTileCacheDir = () => {
+  const cacheDir = new Directory(Paths.cache, 'map_tiles');
+  return cacheDir;
+};
 
 // Export getTileCacheDir so it can be used by OfflineTile component
 export { getTileCacheDir };
@@ -50,15 +54,16 @@ export const calculateTileCount = () => {
 
 // Generate tile file path
 const getTileFilePath = (z, x, y, source = 'osm') => {
-  return `${getTileCacheDir()}${source}/${z}/${x}/${y}.png`;
+  const cacheDir = getTileCacheDir();
+  return `${cacheDir.uri}/${source}/${z}/${x}/${y}.png`;
 };
 
 // Check if tile exists locally
 export const checkTileExists = async (z, x, y, source = 'osm') => {
   const filePath = getTileFilePath(z, x, y, source);
   try {
-    const info = await FileSystem.getInfoAsync(filePath);
-    return info.exists;
+    const file = new FileSystem.File(filePath);
+    return file.exists;
   } catch {
     return false;
   }
@@ -85,33 +90,29 @@ const downloadTile = async (z, x, y, source = 'osm') => {
   const url = sourceUrl.replace('{z}', z).replace('{x}', x).replace('{y}', y);
   
   try {
-    // Ensure directory exists
-    const dir = filePath.substring(0, filePath.lastIndexOf('/'));
-    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+    // Ensure directory exists - create parent directories recursively
+    const cacheDir = getTileCacheDir();
+    if (!cacheDir.exists) cacheDir.create();
     
-    // Download tile
-    const downloadResumable = FileSystem.createDownloadResumable(
-      url,
-      filePath,
-      {},
-      null
-    );
+    const sourceDir = new Directory(cacheDir, source);
+    if (!sourceDir.exists) sourceDir.create();
     
-    const result = await downloadResumable.downloadAsync();
+    const zoomDir = new Directory(sourceDir, String(z));
+    if (!zoomDir.exists) zoomDir.create();
     
-    if (result?.uri) {
-      // Verify file was actually created
-      const fileInfo = await FileSystem.getInfoAsync(result.uri);
-      if (fileInfo.exists && fileInfo.size > 0) {
-        return true;
-      } else {
-        console.warn(`Tile ${z}/${x}/${y} downloaded but file is empty or doesn't exist`);
-        return false;
-      }
+    const xDir = new Directory(zoomDir, String(x));
+    if (!xDir.exists) xDir.create();
+    
+    // Download tile using the new File.downloadFileAsync method
+    const file = await File.downloadFileAsync(url, xDir);
+    
+    // Verify file was actually created
+    if (file.exists && file.size > 0) {
+      return true;
+    } else {
+      console.warn(`Tile ${z}/${x}/${y} downloaded but file is empty or doesn't exist`);
+      return false;
     }
-    
-    console.warn(`Tile ${z}/${x}/${y} download returned no URI`);
-    return false;
   } catch (error) {
     console.warn(`Failed to download tile ${z}/${x}/${y}:`, error.message);
     return false;
@@ -200,10 +201,9 @@ export const downloadTilesForArea = async (onProgress) => {
 
 // Calculate storage used
 export const calculateStorageUsed = async () => {
-  const cacheDir = getTileCacheDir();
   try {
-    const dirInfo = await FileSystem.getInfoAsync(cacheDir);
-    if (!dirInfo.exists) return 0;
+    const cacheDir = getTileCacheDir();
+    if (!cacheDir.exists) return 0;
     
     // Estimate: average tile is ~15KB
     const metadata = await AsyncStorage.getItem('offline_tiles_metadata');
@@ -233,11 +233,10 @@ export const getCachedTileCount = async () => {
 
 // Clear all cached tiles
 export const clearTileCache = async () => {
-  const cacheDir = getTileCacheDir();
   try {
-    const dirInfo = await FileSystem.getInfoAsync(cacheDir);
-    if (dirInfo.exists) {
-      await FileSystem.deleteAsync(cacheDir, { idempotent: true });
+    const cacheDir = getTileCacheDir();
+    if (cacheDir.exists) {
+      cacheDir.delete();
     }
     await AsyncStorage.removeItem('offline_tiles_metadata');
     console.log('Tile cache cleared');

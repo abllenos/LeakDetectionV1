@@ -18,6 +18,8 @@ import { ActivityIndicator } from 'react-native';
 import { startPeriodicDataCheck, stopPeriodicDataCheck } from '../services/dataChecker';
 import { observer } from 'mobx-react-lite';
 import { useDashboardStore } from '../stores/RootStore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { preCacheCustomers, getAllCustomersCount } from '../services/interceptor';
 
 const DashboardScreen = observer(({ navigation }) => {
   const dashboardStore = useDashboardStore();
@@ -25,6 +27,13 @@ const DashboardScreen = observer(({ navigation }) => {
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState(null);
   const [detailsModalVisible, setDetailsModalVisible] = useState(false);
+  
+  // Customer download states
+  const [showDownloadPrompt, setShowDownloadPrompt] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadComplete, setDownloadComplete] = useState(false);
+  const [newCustomersAvailable, setNewCustomersAvailable] = useState(0);
 
   useEffect(() => {
     console.log('[Dashboard] Component mounted, loading data...');
@@ -36,6 +45,9 @@ const DashboardScreen = observer(({ navigation }) => {
         await dashboardStore.loadLeakReports();
         setInitialLoadComplete(true);
         console.log('[Dashboard] Initial data load complete');
+        
+        // Check for new customers after initial load
+        checkForNewCustomers();
       } catch (error) {
         console.error('[Dashboard] Error loading initial data:', error);
         setInitialLoadComplete(true); // Still mark as complete to prevent infinite loading
@@ -51,6 +63,8 @@ const DashboardScreen = observer(({ navigation }) => {
       console.log('[Dashboard] Screen focused, refreshing data...');
       dashboardStore.loadUserData();
       dashboardStore.loadLeakReports();
+      // Also check for new customers when screen is focused
+      checkForNewCustomers();
     });
     
     return () => {
@@ -130,6 +144,50 @@ const DashboardScreen = observer(({ navigation }) => {
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays < 7) return `${diffDays}d ago`;
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  // Check for new customers and prompt download
+  const checkForNewCustomers = async () => {
+    try {
+      // Get cached customer count
+      const cachedCount = await AsyncStorage.getItem('customerCount');
+      const cachedCustomerCount = cachedCount ? parseInt(cachedCount, 10) : 0;
+
+      // Get current API customer count
+      const apiCount = await getAllCustomersCount();
+
+      if (apiCount > cachedCustomerCount) {
+        setNewCustomersAvailable(true);
+        setShowDownloadPrompt(true);
+      }
+    } catch (error) {
+      console.log('Error checking for new customers:', error);
+    }
+  };
+
+  // Handle download customers
+  const handleDownloadCustomers = async () => {
+    try {
+      setIsDownloading(true);
+      setDownloadProgress(0);
+
+      await preCacheCustomers((progress) => {
+        setDownloadProgress(progress);
+      });
+
+      setDownloadComplete(true);
+      setIsDownloading(false);
+      
+      setTimeout(() => {
+        setShowDownloadPrompt(false);
+        setDownloadComplete(false);
+        setNewCustomersAvailable(false);
+      }, 2000);
+    } catch (error) {
+      console.log('Error downloading customers:', error);
+      Alert.alert('Download Failed', 'Failed to download customer data. Please try again.');
+      setIsDownloading(false);
+    }
   };
 
   // Helper function to get leak type color
@@ -319,6 +377,73 @@ const DashboardScreen = observer(({ navigation }) => {
           )}
         </View>
       </ScrollView>
+
+      {/* Customer Download Prompt Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={showDownloadPrompt}
+        onRequestClose={() => !isDownloading && setShowDownloadPrompt(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.downloadModalContainer}>
+            {/* Modal Header */}
+            <View style={styles.downloadModalHeader}>
+              <View style={styles.downloadIconContainer}>
+                <Ionicons 
+                  name={downloadComplete ? "checkmark-circle" : "cloud-download"} 
+                  size={48} 
+                  color={downloadComplete ? "#4CAF50" : "#1e5a8e"} 
+                />
+              </View>
+              <Text style={styles.downloadModalTitle}>
+                {downloadComplete ? "Download Complete!" : "New Customer Data Available"}
+              </Text>
+              <Text style={styles.downloadModalSubtitle}>
+                {downloadComplete 
+                  ? "Customer data has been updated successfully"
+                  : "Updated customer data is available for download"}
+              </Text>
+            </View>
+
+            {/* Progress Bar */}
+            {isDownloading && (
+              <View style={styles.progressContainer}>
+                <View style={styles.progressBar}>
+                  <View style={[styles.progressFill, { width: `${downloadProgress}%` }]} />
+                </View>
+                <Text style={styles.progressText}>{Math.round(downloadProgress)}%</Text>
+              </View>
+            )}
+
+            {/* Action Buttons */}
+            {!downloadComplete && (
+              <View style={styles.downloadModalButtons}>
+                <TouchableOpacity
+                  style={[styles.downloadModalButton, styles.downloadCancelButton]}
+                  onPress={() => setShowDownloadPrompt(false)}
+                  disabled={isDownloading}
+                >
+                  <Text style={styles.downloadCancelButtonText}>
+                    {isDownloading ? "Downloading..." : "Later"}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.downloadModalButton, styles.downloadConfirmButton]}
+                  onPress={handleDownloadCustomers}
+                  disabled={isDownloading}
+                >
+                  {isDownloading ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.downloadConfirmButtonText}>Download Now</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
 
       {/* Report Details Modal */}
       <Modal
@@ -978,6 +1103,87 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   modalActionText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  // Download Modal Styles
+  downloadModalContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 24,
+    width: '85%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  downloadModalHeader: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  downloadIconContainer: {
+    marginBottom: 16,
+  },
+  downloadModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1e293b',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  downloadModalSubtitle: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  progressContainer: {
+    marginBottom: 24,
+  },
+  progressBar: {
+    height: 8,
+    backgroundColor: '#e2e8f0',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#1e5a8e',
+    borderRadius: 4,
+  },
+  progressText: {
+    fontSize: 12,
+    color: '#64748b',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  downloadModalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  downloadModalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  downloadCancelButton: {
+    backgroundColor: '#f1f5f9',
+  },
+  downloadCancelButtonText: {
+    color: '#64748b',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  downloadConfirmButton: {
+    backgroundColor: '#1e5a8e',
+  },
+  downloadConfirmButtonText: {
     color: '#fff',
     fontSize: 15,
     fontWeight: '700',
