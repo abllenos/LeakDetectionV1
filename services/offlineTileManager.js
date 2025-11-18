@@ -10,10 +10,11 @@ const DAVAO_BOUNDS = {
   maxLon: 125.7,
 };
 
-// Zoom levels 1-16 for complete map coverage
-// Lower levels (1-11) = few tiles, broad view
-// Higher levels (12-16) = many tiles, detailed view
-const ZOOM_LEVELS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+// Zoom levels 10-18 for detailed street-level coverage
+// Level 10-12: City overview
+// Level 13-15: Neighborhood/street detail
+// Level 16-18: Building-level detail (most tiles, highest detail)
+const ZOOM_LEVELS = [10, 11, 12, 13, 14, 15, 16, 17, 18];
 
 const TILE_SOURCES = {
   osm: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -120,7 +121,7 @@ const downloadTile = async (z, x, y, source = 'osm') => {
 };
 
 // Download tiles for Davao City area
-export const downloadTilesForArea = async (onProgress) => {
+export const downloadTilesForArea = async (onProgress, isPaused) => {
   const totalTiles = calculateTileCount();
   let downloadedCount = 0;
   let successCount = 0;
@@ -130,8 +131,8 @@ export const downloadTilesForArea = async (onProgress) => {
   console.log(`[OfflineTiles] Zoom levels: ${ZOOM_LEVELS.join(', ')}`);
   console.log(`[OfflineTiles] Bounds:`, DAVAO_BOUNDS);
   
-  // Batch size for concurrent downloads
-  const BATCH_SIZE = 10; // Download 10 tiles at once
+  // Batch size for concurrent downloads - increased for faster downloads
+  const BATCH_SIZE = 50; // Download 50 tiles at once (increased from 10)
   
   for (const zoom of ZOOM_LEVELS) {
     const minTile = latLonToTile(DAVAO_BOUNDS.maxLat, DAVAO_BOUNDS.minLon, zoom);
@@ -149,6 +150,15 @@ export const downloadTilesForArea = async (onProgress) => {
     
     // Download in batches
     for (let i = 0; i < tilesToDownload.length; i += BATCH_SIZE) {
+      // Check if paused
+      if (isPaused && isPaused()) {
+        console.log('[OfflineTiles] Download paused by user');
+        while (isPaused && isPaused()) {
+          await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms before checking again
+        }
+        console.log('[OfflineTiles] Download resumed');
+      }
+      
       const batch = tilesToDownload.slice(i, i + BATCH_SIZE);
       
       // Download batch concurrently

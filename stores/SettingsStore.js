@@ -18,6 +18,8 @@ export class SettingsStore {
   cachedTiles = 0;
   storageUsed = 0; // MB
   mapsLoading = false;
+  mapsPaused = false;
+  mapsDownloadSpeed = 0; // tiles per second
   updateModalVisible = false;
   updateProgress = 0;
   updateSuccess = false;
@@ -49,6 +51,8 @@ export class SettingsStore {
       cachedTiles: observable,
       storageUsed: observable,
       mapsLoading: observable,
+      mapsPaused: observable,
+      mapsDownloadSpeed: observable,
       updateModalVisible: observable,
       updateProgress: observable,
       updateSuccess: observable,
@@ -72,6 +76,8 @@ export class SettingsStore {
       setCachedTiles: action,
       setStorageUsed: action,
       setMapsLoading: action,
+      setMapsPaused: action,
+      setMapsDownloadSpeed: action,
       setUpdateModalVisible: action,
       setUpdateProgress: action,
       setUpdateSuccess: action,
@@ -93,10 +99,14 @@ export class SettingsStore {
       loadPreset: action,
       updateMaps: action,
       startMapDownload: action,
+      pauseMapDownload: action,
+      resumeMapDownload: action,
       clearCache: action,
       confirmClearCache: action,
       deleteClientData: action,
       confirmDeleteClientData: action,
+      clearCustomerData: action,
+      confirmClearCustomerData: action,
       clearAllStorageData: action,
       confirmClearAllStorage: action,
       downloadClientData: action,
@@ -121,6 +131,14 @@ export class SettingsStore {
 
   setMapsLoading(value) {
     this.mapsLoading = value;
+  }
+
+  setMapsPaused(value) {
+    this.mapsPaused = value;
+  }
+
+  setMapsDownloadSpeed(value) {
+    this.mapsDownloadSpeed = value;
   }
 
   setUpdateModalVisible(value) {
@@ -194,6 +212,8 @@ export class SettingsStore {
   // Complex actions
   async checkCachedData() {
     try {
+      console.log('🔍 SettingsStore: Checking cached data...');
+      
       // Check offline map tiles status
       const tilesAvailable = await hasOfflineTiles();
       if (tilesAvailable) {
@@ -220,47 +240,47 @@ export class SettingsStore {
       // Check completed download FIRST (existing data)
       const chunkCount = await AsyncStorage.getItem('allCustomers_chunks');
       const cachedCount = await AsyncStorage.getItem('allCustomers_count');
-      
-      if (chunkCount && cachedCount) {
-        const count = parseInt(cachedCount);
-        console.log(`📦 Download complete: ${count} customers available`);
-        runInAction(() => {
-          this.clientDataAvailable = true;
-          this.clientRecordCount = count;
-        });
-        return;
-      }
-      
-      // If no completed download, check if download is in progress (fast count)
-      const downloadCount = await AsyncStorage.getItem('allCustomers_download_count');
-      if (downloadCount) {
-        const count = parseInt(downloadCount);
-        console.log(`📥 Download in progress: ${count} customers downloaded`);
-        runInAction(() => {
-          this.clientDataAvailable = true;
-          this.clientRecordCount = count;
-        });
-        return;
-      }
-      
-      // Check if download just started (manifest exists but count not yet written)
       const manifest = await AsyncStorage.getItem('allCustomers_manifest');
+      
+      console.log(`📊 Customer data check - chunks: ${chunkCount}, count: ${cachedCount}, manifest exists: ${!!manifest}`);
+      
       if (manifest) {
         try {
           const manifestData = JSON.parse(manifest);
-          if (manifestData.status === 'in-progress') {
-            const pagesFetched = Array.isArray(manifestData.pagesFetched) ? manifestData.pagesFetched.length : 0;
-            const estimatedRecords = pagesFetched * 50; // Approximate: 50 records per page
-            console.log(`📥 Download starting: ~${estimatedRecords} customers (estimated)`);
+          console.log(`📋 Manifest status: ${manifestData.status}, totalRecords: ${manifestData.totalRecords}`);
+          
+          if (manifestData.status === 'complete' && manifestData.totalRecords) {
+            console.log(`✅ Download complete: ${manifestData.totalRecords} customers available`);
             runInAction(() => {
               this.clientDataAvailable = true;
-              this.clientRecordCount = estimatedRecords;
+              this.clientRecordCount = manifestData.totalRecords;
+            });
+            return;
+          }
+          
+          if (manifestData.status === 'in-progress') {
+            const recordsSoFar = manifestData.totalRecords || 0;
+            console.log(`📥 Download in progress: ${recordsSoFar} customers downloaded`);
+            runInAction(() => {
+              this.clientDataAvailable = true;
+              this.clientRecordCount = recordsSoFar;
             });
             return;
           }
         } catch (e) {
           console.warn('Failed to parse manifest:', e);
         }
+      }
+      
+      // Fallback to old metadata keys
+      if (chunkCount && cachedCount) {
+        const count = parseInt(cachedCount);
+        console.log(`📦 Fallback: ${count} customers from legacy metadata`);
+        runInAction(() => {
+          this.clientDataAvailable = true;
+          this.clientRecordCount = count;
+        });
+        return;
       }
       
       console.log('⚠️ No customer data found');
@@ -297,24 +317,45 @@ export class SettingsStore {
 
   updateMaps() {
     this.updateModalVisible = true;
-    this.updateProgress = 0;
-    this.updateSuccess = false;
+    // If paused, just show modal to resume; otherwise reset
+    if (!this.mapsPaused) {
+      this.updateProgress = 0;
+      this.updateSuccess = false;
+    }
   }
 
   async startMapDownload() {
     this.mapsLoading = true;
+    this.mapsPaused = false;
     this.updateProgress = 0;
     this.updateSuccess = false;
+    this.mapsDownloadSpeed = 0;
     this.mapsStatus = 'Downloading...';
 
     try {
       const totalTiles = calculateTileCount();
       console.log(`[OfflineMaps] Starting download of ${totalTiles} tiles for Davao City...`);
       
-      await downloadTilesForArea((progress) => {
-        this.updateProgress = progress.percentage;
-        console.log(`[OfflineMaps] Progress: ${progress.current}/${progress.total} (${progress.percentage}%)`);
-      });
+      let lastUpdate = Date.now();
+      let lastCount = 0;
+      
+      await downloadTilesForArea(
+        (progress) => {
+          // Calculate download speed (tiles per second)
+          const now = Date.now();
+          const timeDiff = (now - lastUpdate) / 1000; // seconds
+          if (timeDiff >= 1) { // Update speed every second
+            const tilesDiff = progress.current - lastCount;
+            this.mapsDownloadSpeed = Math.round(tilesDiff / timeDiff);
+            lastUpdate = now;
+            lastCount = progress.current;
+          }
+          
+          this.updateProgress = progress.percentage;
+          console.log(`[OfflineMaps] Progress: ${progress.current}/${progress.total} (${progress.percentage}%) - ${this.mapsDownloadSpeed} tiles/s`);
+        },
+        () => this.mapsPaused // Pass pause check function
+      );
       
       // Update stats
       const tileCount = await getCachedTileCount();
@@ -324,6 +365,8 @@ export class SettingsStore {
       this.storageUsed = parseFloat(storage.toFixed(2));
       this.mapsStatus = 'Offline Tiles Available';
       this.mapsLoading = false;
+      this.mapsPaused = false;
+      this.mapsDownloadSpeed = 0;
       this.updateSuccess = true;
       
       console.log(`[OfflineMaps] Download complete: ${tileCount} tiles, ${storage.toFixed(2)} MB`);
@@ -331,8 +374,22 @@ export class SettingsStore {
       console.error('[OfflineMaps] Download failed:', error);
       this.mapsStatus = 'Download Failed';
       this.mapsLoading = false;
+      this.mapsPaused = false;
+      this.mapsDownloadSpeed = 0;
       Alert.alert('Download Failed', 'Failed to download offline maps. Please try again.');
     }
+  }
+
+  pauseMapDownload() {
+    this.mapsPaused = true;
+    this.mapsStatus = 'Paused';
+    console.log('[OfflineMaps] Download paused');
+  }
+
+  resumeMapDownload() {
+    this.mapsPaused = false;
+    this.mapsStatus = 'Downloading...';
+    console.log('[OfflineMaps] Download resumed');
   }
 
   clearCache() {
@@ -382,6 +439,67 @@ export class SettingsStore {
       console.error('Failed to delete cache:', error);
       Alert.alert('Error', 'Failed to delete offline data');
       this.clientDeleting = false;
+    }
+  }
+
+  async clearCustomerData() {
+    Alert.alert(
+      'Clear Customer Data',
+      'This will remove all cached customer data. You can re-download it from the dashboard when needed.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Clear', 
+          style: 'destructive',
+          onPress: () => this.confirmClearCustomerData()
+        }
+      ]
+    );
+  }
+
+  async confirmClearCustomerData() {
+    this.clientDeleting = true;
+    try {
+      console.log('🗑️ Clearing all customer data chunks...');
+      
+      // Get all storage keys
+      const allKeys = await AsyncStorage.getAllKeys();
+      
+      // Filter customer-related keys
+      const customerKeys = allKeys.filter(key => 
+        key.startsWith('allCustomers_chunk_') ||
+        key === 'allCustomers_manifest' ||
+        key === 'allCustomers_count' ||
+        key === 'allCustomers_timestamp' ||
+        key === 'allCustomers_chunks' ||
+        key === 'allCustomers_download_count' ||
+        key === 'allCustomers' // Legacy single-file storage
+      );
+      
+      console.log(`📦 Found ${customerKeys.length} customer data keys to remove`);
+      
+      if (customerKeys.length > 0) {
+        await AsyncStorage.multiRemove(customerKeys);
+        console.log('✅ All customer data cleared successfully');
+      }
+      
+      runInAction(() => {
+        this.clientDataAvailable = false;
+        this.clientRecordCount = 0;
+        this.clientDeleting = false;
+      });
+      
+      Alert.alert(
+        'Success', 
+        `Cleared ${customerKeys.length} customer data items. You can re-download from the dashboard.`,
+        [{ text: 'OK' }]
+      );
+    } catch (error) {
+      console.error('❌ Failed to clear customer data:', error);
+      runInAction(() => {
+        this.clientDeleting = false;
+      });
+      Alert.alert('Error', 'Failed to clear customer data: ' + error.message);
     }
   }
 

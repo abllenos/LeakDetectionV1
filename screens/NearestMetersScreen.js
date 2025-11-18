@@ -2,21 +2,13 @@ import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, StatusBar, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import MapView, { Marker } from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle, Polygon, Text as SvgText } from 'react-native-svg';
 import { ActivityIndicator } from 'react-native';
 import { observer } from 'mobx-react-lite';
 import { toJS } from 'mobx';
 import { useNearestMetersStore } from '../stores/RootStore';
-import OfflineTile from '../components/OfflineTile';
-
-// Default map tile source (OpenStreetMap)
-const TILE_SOURCES = [
-  {
-    url: 'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png'
-  }
-];
+import LeafletMap from '../components/LeafletMap';
 
 const NearestMetersScreenInner = observer(function NearestMetersScreenInner({ navigation, coordinates }) {
   const mapRef = useRef(null);
@@ -59,85 +51,26 @@ const NearestMetersScreenInner = observer(function NearestMetersScreenInner({ na
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1e5a8e" translucent />
       {/* Map */}
-      <MapView
+      <LeafletMap
         ref={mapRef}
-        style={styles.map}
-        initialRegion={{
-          latitude: coordinates?.latitude || 7.0731,
-          longitude: coordinates?.longitude || 125.6129,
-          latitudeDelta: 0.02,
-          longitudeDelta: 0.02,
-        }}
-        showsUserLocation
-      >
-        <OfflineTile
-          urlTemplate={TILE_SOURCES[0].url}
-          maximumZ={19}
-          tileSize={256}
-          zIndex={0}
-        />
-
-        {/* Markers for nearest meters - Top 3 shown as pin markers */}
-        {store.nearestMeters.map((meter, idx) => {
-          console.log(`Marker ${idx + 1}:`, meter.id, 'at', meter.latitude, meter.longitude);
-          // Add small offset to make stacked markers visible
-          // Offset in a circular pattern around the original position
+        initialCenter={[
+          coordinates?.latitude || 7.0731,
+          coordinates?.longitude || 125.6129
+        ]}
+        initialZoom={15}
+        markers={store.nearestMeters.map((meter, idx) => {
           const offsetLat = idx === 0 ? 0 : (Math.cos((idx - 1) * Math.PI) * 0.0001);
           const offsetLng = idx === 0 ? 0 : (Math.sin((idx - 1) * Math.PI) * 0.0001);
-          
-          return (
-            <Marker
-              key={`marker-${idx}-${meter.id}`}
-              coordinate={{ 
-                latitude: meter.latitude + offsetLat, 
-                longitude: meter.longitude + offsetLng 
-              }}
-              onPress={() => handleMeterSelect(meter)}
-              anchor={{ x: 0.5, y: 1 }}
-              zIndex={1000 - idx}
-            >
-              <View style={styles.markerContainer}>
-                <Svg width={40} height={50} viewBox="0 0 40 50">
-                  {/* Pin drop shape */}
-                  <Polygon 
-                    points="20,2 35,17 35,22 25,22 20,50 15,22 5,22 5,17" 
-                    fill={getBadgeColor(idx)} 
-                    stroke="#fff"
-                    strokeWidth="2"
-                  />
-                  {/* Rank number badge on pin */}
-                  <Circle cx="20" cy="12" r="8" fill="#fff" />
-                  <SvgText
-                    x="20"
-                    y="17"
-                    fontSize="12"
-                    fontWeight="700"
-                    fill={getBadgeColor(idx)}
-                    textAnchor="middle"
-                  >
-                    {idx + 1}
-                  </SvgText>
-                </Svg>
-              </View>
-            </Marker>
-          );
+          return {
+            position: [meter.latitude + offsetLat, meter.longitude + offsetLng],
+            label: `${idx + 1}`,
+            color: getBadgeColor(idx),
+            onClick: () => handleMeterSelect(meter)
+          };
         })}
-        {/* Pinpoint drag marker: only show when dragMode is true */}
-        {store.dragMode && store.pinReady && store.dragPin && (
-          <Marker
-            key="drag-pin"
-            coordinate={toJS(store.dragPin)}
-            draggable={true}
-            pinColor="#3b82f6"
-            title={'Drag to set location'}
-            onDragEnd={e => {
-              // Just update the position, don't confirm yet
-              store.setDragPin(e.nativeEvent.coordinate);
-            }}
-            onDrag={e => store.setDragPin(e.nativeEvent.coordinate)}
-          />
-        )}
-      </MapView>
+        showUserLocation={true}
+        userLocation={coordinates ? { latitude: coordinates.latitude, longitude: coordinates.longitude } : null}
+      />
       {/* Floating button to start drag mode */}
       {/* Floating button to start drag pin mode: only show when not in drag mode */}
       {/* Show the floating button only when not in drag mode (meter list panel is open) */}

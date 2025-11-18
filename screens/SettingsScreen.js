@@ -140,14 +140,65 @@ const SettingsScreen = observer(({ navigation }) => {
           </View>
 
           <View style={styles.actionsRow}>
-            <TouchableOpacity style={styles.primaryBtn} onPress={store.updateMaps.bind(store)} disabled={store.mapsLoading}>
-              {store.mapsLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Update Maps</Text>}
+            <TouchableOpacity style={styles.primaryBtn} onPress={store.updateMaps.bind(store)} disabled={store.mapsLoading && !store.mapsPaused}>
+              {store.mapsLoading && !store.mapsPaused ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={styles.primaryBtnText}>
+                    {store.mapsPaused ? 'Resume Download' : 'Update Maps'}
+                  </Text>
+                  {store.mapsPaused && <Ionicons name="play-circle" size={18} color="#fff" />}
+                </View>
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.outlineBtn} onPress={store.clearCache.bind(store)}>
               <Text style={styles.outlineBtnText}>Clear Cache</Text>
             </TouchableOpacity>
           </View>
+        </View>
+
+        {/* Customer Data Card */}
+        <View style={styles.card}>
+          <View style={styles.cardHeaderRow}>
+            <Ionicons name="people" size={18} color="#1e5a8e" />
+            <Text style={styles.cardTitle}>  Customer Data</Text>
+          </View>
+
+          <View style={styles.rowBetween}>
+            <View>
+              <Text style={styles.smallLabel}>Cached Records:</Text>
+              <Text style={styles.valueText}>{store.clientRecordCount || 0}</Text>
+            </View>
+            <View>
+              <Text style={styles.smallLabel}>Status:</Text>
+              <Text style={styles.valueText}>{store.clientRecordCount > 0 ? 'Downloaded' : 'Not Available'}</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity 
+            style={[styles.clearDataButton, store.clientDeleting && styles.clearDataButtonDisabled]} 
+            onPress={() => store.clearCustomerData()}
+            disabled={store.clientDeleting}
+            activeOpacity={0.7}
+          >
+            <LinearGradient
+              colors={store.clientDeleting ? ['#9ca3af', '#6b7280'] : ['#ef4444', '#dc2626']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.clearDataGradient}
+            >
+              {store.clientDeleting ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="trash-outline" size={20} color="#fff" />
+                  <Text style={styles.clearDataButtonText}>Clear Customer Data</Text>
+                </>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
         </View>
 
         {/* Offline Queue Card */}
@@ -340,44 +391,78 @@ const SettingsScreen = observer(({ navigation }) => {
                     <View style={[styles.progressBarFill, { width: `${store.updateProgress}%` }]} />
                   </View>
                   <Text style={styles.progressText}>{store.updateProgress}%</Text>
+                  {store.mapsLoading && store.mapsDownloadSpeed > 0 && (
+                    <Text style={styles.speedText}>
+                      {store.mapsDownloadSpeed} tiles/sec {store.mapsPaused && '(Paused)'}
+                    </Text>
+                  )}
                 </>
               ) : (
                 <Text style={styles.successText}>Maps updated successfully ✅</Text>
               )}
             </View>
 
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.modalCancelBtn}
-                onPress={() => {
-                  if (!store.mapsLoading) store.setUpdateModalVisible(false);
-                }}
-                disabled={store.mapsLoading}
-              >
-                <Text style={styles.modalCancelText}>{store.mapsLoading ? 'Please wait' : 'Cancel'}</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalConfirmBtn}
-                onPress={() => {
-                  if (store.updateSuccess) {
-                    store.setUpdateModalVisible(false);
-                    store.setUpdateProgress(0);
-                    store.setUpdateSuccess(false);
-                  } else {
-                    store.startMapDownload();
-                  }
-                }}
-                disabled={store.mapsLoading}
-              >
-                <LinearGradient
-                  colors={['#1e5a8e', '#0f4a78']}
-                  style={styles.modalConfirmGradient}
+            {!store.mapsLoading && !store.mapsPaused ? (
+              <View style={styles.modalButtonRow}>
+                <TouchableOpacity
+                  style={styles.modalCancelButton}
+                  onPress={() => store.setUpdateModalVisible(false)}
                 >
-                  <Text style={styles.modalConfirmText}>{store.mapsLoading ? 'Downloading...' : store.updateSuccess ? 'Done' : 'Start'}</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
+                  <Text style={styles.modalCancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.modalPrimaryButton}
+                  onPress={() => {
+                    if (store.updateSuccess) {
+                      store.setUpdateModalVisible(false);
+                      store.setUpdateProgress(0);
+                      store.setUpdateSuccess(false);
+                    } else {
+                      store.startMapDownload();
+                    }
+                  }}
+                >
+                  <LinearGradient
+                    colors={store.updateSuccess ? ['#10b981', '#059669'] : ['#1e5a8e', '#0f4a78']}
+                    style={styles.modalPrimaryGradient}
+                  >
+                    <Text style={styles.modalPrimaryButtonText}>{store.updateSuccess ? 'Done' : 'Start Download'}</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.modalButtonRow}>
+                {store.mapsPaused && (
+                  <TouchableOpacity
+                    style={styles.modalCancelButton}
+                    onPress={() => store.setUpdateModalVisible(false)}
+                  >
+                    <Text style={styles.modalCancelButtonText}>Close</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={[
+                    styles.modalPauseButton,
+                    store.mapsPaused && styles.modalResumeButton,
+                    store.mapsPaused && { flex: 1 }
+                  ]}
+                  onPress={() => {
+                    if (store.mapsPaused) store.resumeMapDownload(); else store.pauseMapDownload();
+                  }}
+                >
+                  <Ionicons 
+                    name={store.mapsPaused ? 'play' : 'pause'} 
+                    size={18} 
+                    color="#fff" 
+                    style={{ marginRight: 8 }}
+                  />
+                  <Text style={styles.modalPauseButtonText}>
+                    {store.mapsPaused ? 'Resume' : 'Pause'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </View>
       </Modal>
@@ -498,6 +583,34 @@ const styles = StyleSheet.create({
   metaLabel: { color: '#6b7280' },
   metaValue: { color: '#111', fontWeight: '600' },
 
+  clearDataButton: {
+    marginTop: 16,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#ef4444',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 4,
+  },
+  clearDataButtonDisabled: {
+    opacity: 0.6,
+    shadowOpacity: 0.1,
+  },
+  clearDataGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+  },
+  clearDataButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 0.5,
+  },
   logoutBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -606,6 +719,105 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
   },
+
+  /* Modern modal button styles */
+  modalButtonRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+    marginTop: 8,
+  },
+  modalCancelButton: {
+    flex: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCancelButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  modalPrimaryButton: {
+    flex: 1.5,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#1e5a8e',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  modalPrimaryGradient: {
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalPrimaryButtonText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  modalPauseButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: '#fbbf24',
+    shadowColor: '#f59e0b',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  modalResumeButton: {
+    backgroundColor: '#10b981',
+    shadowColor: '#059669',
+  },
+  modalPauseButtonText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
+
+  /* Download controls */
+  downloadingControls: {
+    width: '100%',
+    alignItems: 'center',
+    paddingTop: 8,
+  },
+  pauseButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    backgroundColor: '#fef3c7',
+    borderWidth: 2,
+    borderColor: '#fbbf24',
+  },
+  pauseButtonActive: {
+    backgroundColor: '#d1fae5',
+    borderColor: '#10b981',
+  },
+  pauseButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#92400e',
+  },
+  pauseButtonTextActive: {
+    color: '#065f46',
+  },
   updateModalContainer: {
     backgroundColor: '#fff',
     borderRadius: 16,
@@ -624,6 +836,7 @@ const styles = StyleSheet.create({
   progressBarBackground: { width: '100%', height: 12, backgroundColor: '#eef2ff', borderRadius: 8, overflow: 'hidden' },
   progressBarFill: { height: 12, backgroundColor: '#6366f1' },
   progressText: { marginTop: 8, fontSize: 13, color: '#374151', fontWeight: '600' },
+  speedText: { marginTop: 4, fontSize: 12, color: '#6b7280', fontWeight: '500' },
   successText: { fontSize: 14, color: '#059669', fontWeight: '700', marginBottom: 6 },
   syncProgressWrap: {
     flexDirection: 'row',

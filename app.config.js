@@ -3,16 +3,19 @@ export default {
     name: "LeakDetection",
     slug: "leakdetection",
     version: "1.0.2",
-    platforms: ["ios", "android", "web"],
+    platforms: ["ios", "android"],
     orientation: "portrait",
   icon: "./assets/applogoleak.jpeg",
     updates: {
-      enabled: false,
+      url: "https://u.expo.dev/da631ae3-5d6d-4ef3-bc20-498f42ef3993",
     },
     assetBundlePatterns: ["**/*"],
     ios: {
       supportsTablet: true,
       buildNumber: "5",
+      runtimeVersion: {
+        policy: "appVersion",
+      },
       infoPlist: {
         NSLocationWhenInUseUsageDescription:
           "This app needs your location to detect leaks and show nearby meters.",
@@ -27,6 +30,7 @@ export default {
     android: {
       package: "com.leakdetection.app",
       versionCode: 5,
+      runtimeVersion: "1.0.0",
       permissions: [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
@@ -44,7 +48,6 @@ export default {
         },
       },
     },
-    web: {},
     extra: {
       eas: {
         projectId: "da631ae3-5d6d-4ef3-bc20-498f42ef3993",

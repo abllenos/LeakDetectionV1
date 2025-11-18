@@ -10,11 +10,24 @@ const LeafletMap = ({
   latitude = 7.0731, 
   longitude = 125.6128, 
   zoom = 14,
+  initialCenter = null,
+  initialZoom = null,
   markers = [],
+  showUserLocation = true,
+  userLocation = null, // Pass user location from React Native
   onMarkerPress,
   onMapPress,
   style
 }) => {
+  
+  // Use initialCenter if provided, otherwise use latitude/longitude
+  const centerLat = initialCenter ? initialCenter[0] : latitude;
+  const centerLng = initialCenter ? initialCenter[1] : longitude;
+  const mapZoom = initialZoom || zoom;
+  
+  // Use passed userLocation or try to get from props
+  const userLat = userLocation ? userLocation.latitude : latitude;
+  const userLng = userLocation ? userLocation.longitude : longitude;
   
   const htmlContent = `
     <!DOCTYPE html>
@@ -30,6 +43,19 @@ const LeafletMap = ({
           height: 100%; 
           width: 100%;
         }
+        .custom-marker {
+          width: 32px;
+          height: 32px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-weight: bold;
+          font-size: 14px;
+          border: 3px solid white;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
       </style>
     </head>
     <body>
@@ -39,7 +65,7 @@ const LeafletMap = ({
         var map = L.map('map', {
           zoomControl: true,
           attributionControl: true
-        }).setView([${latitude}, ${longitude}], ${zoom});
+        }).setView([${centerLat}, ${centerLng}], ${mapZoom});
 
         // Add OpenStreetMap tiles
         L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -47,23 +73,66 @@ const LeafletMap = ({
           attribution: '© OpenStreetMap contributors'
         }).addTo(map);
 
-        // Add markers
+        // Add custom icon function
+        function createCustomIcon(label, color) {
+          return L.divIcon({
+            className: 'custom-div-icon',
+            html: '<div class="custom-marker" style="background-color: ' + color + ';">' + label + '</div>',
+            iconSize: [32, 32],
+            iconAnchor: [16, 16]
+          });
+        }
+
+        // Add markers with custom styling
         var markers = ${JSON.stringify(markers)};
         markers.forEach(function(marker) {
-          var m = L.marker([marker.latitude, marker.longitude])
+          var lat = marker.position ? marker.position[0] : marker.latitude;
+          var lng = marker.position ? marker.position[1] : marker.longitude;
+          var label = marker.label || '';
+          var color = marker.color || '#3b82f6';
+          
+          var icon = label ? createCustomIcon(label, color) : L.Icon.Default();
+          
+          var m = L.marker([lat, lng], { icon: icon })
             .addTo(map);
           
           if (marker.title || marker.description) {
             m.bindPopup('<b>' + (marker.title || '') + '</b><br>' + (marker.description || ''));
           }
           
-          m.on('click', function() {
-            window.ReactNativeWebView.postMessage(JSON.stringify({
-              type: 'markerPress',
-              data: marker
-            }));
-          });
+          if (marker.onClick) {
+            m.on('click', function() {
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'markerPress',
+                data: marker
+              }));
+            });
+          }
         });
+
+        // Always show user location with a blue pulsing marker
+        // Add user location marker directly from React Native props
+        var userLocationMarker = {
+          latitude: ${userLat},
+          longitude: ${userLng}
+        };
+        
+        var userIcon = L.divIcon({
+          className: 'user-location-marker',
+          html: '<div style="position: relative; width: 32px; height: 32px;">' +
+                  '<div style="position: absolute; width: 32px; height: 32px; background-color: rgba(59, 130, 246, 0.3); border-radius: 50%; animation: pulse 2s infinite;"></div>' +
+                  '<div style="position: absolute; width: 20px; height: 20px; top: 6px; left: 6px; background-color: #3b82f6; border: 4px solid white; border-radius: 50%; box-shadow: 0 3px 10px rgba(0,0,0,0.4);"></div>' +
+                '</div>' +
+                '<style>@keyframes pulse { 0% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.8); opacity: 0.5; } 100% { transform: scale(2.5); opacity: 0; }}</style>',
+          iconSize: [32, 32],
+          iconAnchor: [16, 16]
+        });
+        
+        L.marker([userLocationMarker.latitude, userLocationMarker.longitude], { icon: userIcon })
+          .addTo(map)
+          .bindPopup('<b>📍 Your Current Location</b>');
+        
+        console.log('✅ User location marker added at:', userLocationMarker.latitude, userLocationMarker.longitude);
 
         // Handle map clicks
         map.on('click', function(e) {
@@ -73,17 +142,6 @@ const LeafletMap = ({
             longitude: e.latlng.lng
           }));
         });
-
-        // Expose functions for React Native to call
-        window.updateCenter = function(lat, lng, zoom) {
-          map.setView([lat, lng], zoom || map.getZoom());
-        };
-
-        window.addMarker = function(lat, lng, title, description) {
-          L.marker([lat, lng])
-            .addTo(map)
-            .bindPopup('<b>' + (title || '') + '</b><br>' + (description || ''));
-        };
 
         // Notify React Native that map is ready
         window.ReactNativeWebView.postMessage(JSON.stringify({

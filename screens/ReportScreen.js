@@ -356,6 +356,10 @@ const ReportScreenInner = observer(({ navigation, params }) => {
   };
 
   const handleDragPinOnMap = () => {
+    // Clear any existing meter search params to prevent auto-search
+    try {
+      navigation.setParams({ meterNumber: null, searchResult: null });
+    } catch (e) { /* noop */ }
     store.startDragMode();
   };
 
@@ -465,12 +469,16 @@ const ReportScreenInner = observer(({ navigation, params }) => {
           longitude={store.marker.longitude}
           zoom={15}
           markers={[
-            {
-              latitude: store.marker.latitude,
-              longitude: store.marker.longitude,
-              title: 'Current Location',
-              description: `Lat: ${store.marker.latitude.toFixed(4)}, Lon: ${store.marker.longitude.toFixed(4)}`
-            },
+            // Add selected meter marker if available
+            ...(store.currentMeterDetails?.latitude && store.currentMeterDetails?.longitude ? [{
+              latitude: store.currentMeterDetails.latitude,
+              longitude: store.currentMeterDetails.longitude,
+              title: '🚰 Selected Meter',
+              description: `${store.currentMeterDetails.meterNumber || 'N/A'} - ${store.currentMeterDetails.address || 'N/A'}`,
+              color: '#10b981',
+              label: '📍'
+            }] : []),
+            // Add drag pin if in drag mode
             ...(store.dragPin ? [{
               latitude: store.dragPin.latitude,
               longitude: store.dragPin.longitude,
@@ -478,6 +486,8 @@ const ReportScreenInner = observer(({ navigation, params }) => {
               description: `Lat: ${store.dragPin.latitude.toFixed(4)}, Lon: ${store.dragPin.longitude.toFixed(4)}`
             }] : [])
           ]}
+          userLocation={{ latitude: store.marker.latitude, longitude: store.marker.longitude }}
+          showUserLocation={true}
           onMapPress={handleMapPress}
           style={StyleSheet.absoluteFill}
         />

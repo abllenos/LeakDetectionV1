@@ -297,6 +297,8 @@ export class ReportMapStore {
   startDragMode() {
     this.showSourceModal = false;
     this.showDragConfirmModal = true;
+    // Clear current meter details when switching to drag mode
+    this.currentMeterDetails = null;
   }
 
   confirmStartDrag() {

@@ -1,29 +1,20 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, StatusBar, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import MapView from 'react-native-maps';
 import { Ionicons } from '@expo/vector-icons';
 import { observer } from 'mobx-react-lite';
 import { toJS } from 'mobx';
 import { useReportMapStore } from '../stores/RootStore';
-import OfflineTile from '../components/OfflineTile';
+import LeafletMap from '../components/LeafletMap';
 
 // Component wrapped with observer - navigation/route props extracted to prevent MobX observation
 const ReportHomeScreenInner = observer(({ navigation, params }) => {
   const store = useReportMapStore();
-  const mapRef = useRef(null);
-  
-  const TILE_SOURCES = [
-    { name: 'OSM DE', url: 'https://tile.openstreetmap.de/{z}/{x}/{y}.png', attribution: '© OpenStreetMap contributors' },
-  ];
 
   useEffect(() => {
     (async () => {
-      const nextRegion = await store.initializeLocation();
-      if (nextRegion) {
-        mapRef.current?.animateToRegion(nextRegion, 600);
-      }
+      await store.initializeLocation();
     })();
   }, []);
 
@@ -31,10 +22,7 @@ const ReportHomeScreenInner = observer(({ navigation, params }) => {
   useEffect(() => {
     const sel = params?.selectedMeter;
     if (sel) {
-      const nextRegion = store.handleSelectedMeter(sel);
-      if (nextRegion) {
-        mapRef.current?.animateToRegion(nextRegion, 600);
-      }
+      store.handleSelectedMeter(sel);
       navigation.setParams({ selectedMeter: null });
     }
   }, [params]);
@@ -82,9 +70,19 @@ const ReportHomeScreenInner = observer(({ navigation, params }) => {
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
         <View style={styles.mapWrap}>
-          <MapView ref={mapRef} style={styles.map} initialRegion={toJS(store.region)} showsUserLocation>
-            <OfflineTile urlTemplate={TILE_SOURCES[store.tileIndex].url} maximumZ={19} tileSize={256} zIndex={0} />
-          </MapView>
+          <LeafletMap
+            latitude={store.region.latitude}
+            longitude={store.region.longitude}
+            zoom={14}
+            markers={store.marker ? [{
+              latitude: store.marker.latitude,
+              longitude: store.marker.longitude,
+              title: 'Current Location'
+            }] : []}
+            userLocation={{ latitude: store.region.latitude, longitude: store.region.longitude }}
+            showUserLocation={true}
+            style={styles.map}
+          />
 
           <View style={styles.searchOverlay}>
             <View style={styles.searchInputWrap}>

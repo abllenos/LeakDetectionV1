@@ -244,8 +244,8 @@ export const checkForNewData = async () => {
 
 export const fetchAllCustomers = async (forceRefresh = false, onProgress = null, opts = {}) => {
   const BATCH_SIZE = 5000; // Download 5000 records per batch
-  const CHUNK_SIZE = 10000; // Save to AsyncStorage every 10,000 records
-  const API_URL = 'https://dev-api.davao-water.gov.ph/dcwd-gis/api/v1/admin/customer/all';
+  const CHUNK_SIZE = 1000; // Save to AsyncStorage every 1,000 records (reduced from 10k to avoid SQLite limits)
+  const API_URL = 'https://api.davao-water.gov.ph/dcwd-gis/api/v1/admin/customer/all';
   
   try {
     console.log('📥 Starting batched customer data download...');
@@ -444,6 +444,19 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
 export const preCacheCustomers = async (onProgress = null, opts = {}) => {
   try {
     console.log('🔄 Pre-caching customer data...');
+    
+    // Clear any corrupted old customer data first
+    console.log('🧹 Clearing old customer data chunks...');
+    const keys = await AsyncStorage.getAllKeys();
+    const chunkKeys = keys.filter(k => k.startsWith('allCustomers_chunk_'));
+    if (chunkKeys.length > 0) {
+      await AsyncStorage.multiRemove(chunkKeys);
+      console.log(`🧹 Removed ${chunkKeys.length} old chunks`);
+    }
+    
+    // Also clear metadata
+    await AsyncStorage.multiRemove(['allCustomers_chunks', 'allCustomers_count', 'allCustomers_manifest', 'allCustomers_timestamp']);
+    
     await fetchAllCustomers(true, onProgress, opts);
     console.log('✓ Customer data pre-cached successfully');
     return true;
@@ -727,7 +740,7 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // API Base URL
-export const API_BASE = 'https://dev-api.davao-water.gov.ph/dcwd-gis/api/v1';
+export const API_BASE = 'https://api.davao-water.gov.ph/dcwd-gis/api/v1';
 
 // Create axios instance
 export const devApi = axios.create({

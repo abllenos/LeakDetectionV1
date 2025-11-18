@@ -19,7 +19,7 @@ import { startPeriodicDataCheck, stopPeriodicDataCheck } from '../services/dataC
 import { observer } from 'mobx-react-lite';
 import { useDashboardStore } from '../stores/RootStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { preCacheCustomers, getAllCustomersCount } from '../services/interceptor';
+import { preCacheCustomers } from '../services/interceptor';
 
 const DashboardScreen = observer(({ navigation }) => {
   const dashboardStore = useDashboardStore();
@@ -149,17 +149,21 @@ const DashboardScreen = observer(({ navigation }) => {
   // Check for new customers and prompt download
   const checkForNewCustomers = async () => {
     try {
-      // Get cached customer count
-      const cachedCount = await AsyncStorage.getItem('customerCount');
-      const cachedCustomerCount = cachedCount ? parseInt(cachedCount, 10) : 0;
-
-      // Get current API customer count
-      const apiCount = await getAllCustomersCount();
-
-      if (apiCount > cachedCustomerCount) {
-        setNewCustomersAvailable(true);
-        setShowDownloadPrompt(true);
+      // Check if download was completed successfully
+      const manifest = await AsyncStorage.getItem('allCustomers_manifest');
+      const cachedCount = await AsyncStorage.getItem('allCustomers_count');
+      
+      if (manifest && cachedCount) {
+        const manifestData = JSON.parse(manifest);
+        // Only skip if download was completed successfully
+        if (manifestData.status === 'complete') {
+          console.log('[Dashboard] Customer data already downloaded:', cachedCount, 'records');
+          return;
+        }
       }
+
+      console.log('[Dashboard] No complete customer download found - showing prompt');
+      setShowDownloadPrompt(true);
     } catch (error) {
       console.log('Error checking for new customers:', error);
     }
@@ -385,7 +389,7 @@ const DashboardScreen = observer(({ navigation }) => {
         visible={showDownloadPrompt}
         onRequestClose={() => !isDownloading && setShowDownloadPrompt(false)}
       >
-        <View style={styles.modalOverlay}>
+        <View style={styles.downloadModalOverlay}>
           <View style={styles.downloadModalContainer}>
             {/* Modal Header */}
             <View style={styles.downloadModalHeader}>
@@ -1018,79 +1022,91 @@ const styles = StyleSheet.create({
   // Modal styles
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     justifyContent: 'flex-end',
   },
   detailsModalContainer: {
     backgroundColor: '#fff',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '80%',
+    maxHeight: '85%',
     paddingBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 12,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
   },
   modalTitle: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: '700',
     color: '#1e293b',
   },
   modalContent: {
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingTop: 16,
   },
   detailRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 20,
-    paddingBottom: 20,
+    marginBottom: 18,
+    paddingBottom: 18,
     borderBottomWidth: 1,
     borderBottomColor: '#f1f5f9',
   },
   detailIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#e6f0fb',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 14,
   },
   detailTextContainer: {
     flex: 1,
   },
   detailLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#64748b',
-    marginBottom: 4,
+    marginBottom: 6,
     textTransform: 'uppercase',
-    fontWeight: '600',
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   detailValue: {
     fontSize: 16,
     color: '#1e293b',
-    fontWeight: '500',
+    fontWeight: '600',
+    lineHeight: 22,
   },
   statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
     alignSelf: 'flex-start',
-    marginTop: 4,
+    marginTop: 6,
   },
   statusBadgeText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
+    letterSpacing: 0.3,
   },
   modalActions: {
     flexDirection: 'row',
     gap: 12,
-    marginTop: 10,
+    marginTop: 16,
+    paddingTop: 8,
   },
   modalActionButton: {
     flex: 1,
@@ -1098,9 +1114,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#1e5a8e',
-    paddingVertical: 14,
-    borderRadius: 12,
+    paddingVertical: 16,
+    borderRadius: 14,
     gap: 8,
+    shadowColor: '#1e5a8e',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 5,
   },
   modalActionText: {
     color: '#fff',
@@ -1108,11 +1129,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   // Download Modal Styles
+  downloadModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
   downloadModalContainer: {
     backgroundColor: '#fff',
     borderRadius: 20,
     padding: 24,
-    width: '85%',
+    width: '100%',
     maxWidth: 400,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
