@@ -7,6 +7,7 @@ import { observer } from 'mobx-react-lite';
 import { toJS } from 'mobx';
 import { useReportMapStore } from '../stores/RootStore';
 import LeafletMap from '../components/LeafletMap';
+import { useFocusEffect } from '@react-navigation/native';
 
 const ReportScreenInner = observer(({ navigation, params }) => {
   const insets = useSafeAreaInsets();
@@ -97,6 +98,17 @@ const ReportScreenInner = observer(({ navigation, params }) => {
       return () => clearTimeout(timeoutId);
     }
   }, [store.dragPin?.latitude, store.dragPin?.longitude, fetchRoadRoute]);
+
+  // Update route when a meter is searched and found
+  React.useEffect(() => {
+    if (store.currentMeterDetails?.latitude && store.currentMeterDetails?.longitude && store.marker && !store.dragMode) {
+      const meterLocation = {
+        latitude: store.currentMeterDetails.latitude,
+        longitude: store.currentMeterDetails.longitude
+      };
+      fetchRoadRoute(toJS(store.marker), meterLocation);
+    }
+  }, [store.currentMeterDetails?.latitude, store.currentMeterDetails?.longitude, fetchRoadRoute, store.dragMode]);
 
   useEffect(() => {
     (async () => {
@@ -231,11 +243,15 @@ const ReportScreenInner = observer(({ navigation, params }) => {
     if (useDragPin) {
       // Directly enter drag mode without showing modals
       console.log('Entering drag mode directly from ReportHome');
+      // Clear any previous meter data from Nearest Meters
+      setNearestMeterData(null);
+      store.setCurrentMeterDetails(null);
+      store.setMeterNumber('');
       store.setShowSourceModal(false);
       store.setShowDragConfirmModal(false);
       store.confirmStartDrag(); // This sets dragMode=true and creates the drag pin
       // Clear the param to prevent re-triggering
-      try { navigation.setParams({ useDragPin: null }); } catch (e) { /* noop */ }
+      try { navigation.setParams({ useDragPin: null, fromNearest: null, prefilledData: null }); } catch (e) { /* noop */ }
     } else if (useCurrentLocation) {
       // Directly use current location
       const coords = store.marker || store.region;
@@ -254,14 +270,35 @@ const ReportScreenInner = observer(({ navigation, params }) => {
     }
   }, [params]);
 
+  // Clear nearest meter data when screen gains focus (after navigating back)
+  useFocusEffect(
+    React.useCallback(() => {
+      // Clear meter data when screen regains focus (e.g., coming back from another screen)
+      console.log('🔄 Focus effect triggered. nearestMeterData:', nearestMeterData);
+      if (nearestMeterData) {
+        console.log('🧹 Clearing nearest meter data on focus');
+        setNearestMeterData(null);
+        store.setCurrentMeterDetails(null);
+        store.setMeterNumber('');
+      }
+    }, [nearestMeterData])
+  );
+
   const handleMapPress = (e) => {
-    if (!store.dragMode) {
-      // Handle both react-native-maps format (e.nativeEvent.coordinate) 
-      // and LeafletMap format (direct latitude/longitude)
-      const latitude = e?.nativeEvent?.coordinate?.latitude || e?.latitude;
-      const longitude = e?.nativeEvent?.coordinate?.longitude || e?.longitude;
-      
-      if (latitude && longitude) {
+    // Handle both react-native-maps format (e.nativeEvent.coordinate) 
+    // and LeafletMap format (direct latitude/longitude)
+    const latitude = e?.nativeEvent?.coordinate?.latitude || e?.latitude;
+    const longitude = e?.nativeEvent?.coordinate?.longitude || e?.longitude;
+    
+    console.log('📍 Map pressed:', { latitude, longitude, dragMode: store.dragMode });
+    
+    if (latitude && longitude) {
+      if (store.dragMode) {
+        // In drag mode, update the drag pin location
+        console.log('🎯 Updating drag pin to:', { latitude, longitude });
+        store.setDragPin({ latitude, longitude });
+      } else {
+        // Not in drag mode, update the main marker
         store.updateMarkerAndLabel(latitude, longitude);
       }
     }
@@ -297,6 +334,21 @@ const ReportScreenInner = observer(({ navigation, params }) => {
   };
 
   const reportLeak = () => {
+    // If in drag mode with a drag pin, go directly to form with drag pin location
+    if (store.dragMode && store.dragPin) {
+      const coords = {
+        latitude: store.dragPin.latitude,
+        longitude: store.dragPin.longitude,
+      };
+      
+      navigation.navigate('LeakReportForm', {
+        meterData: { meterNumber: store.meterNumber || '', accountNumber: '', address: '' },
+        coordinates: coords,
+        fromDragPin: true,
+      });
+      return;
+    }
+    
     // Check if we have stored meter data from NearestMeters
     if (nearestMeterData) {
       // Directly navigate to leak form with the meter data
@@ -316,10 +368,31 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         coordinates: coords,
         fromNearest: true,
       });
-    } else {
-      // Original behavior - show source modal
-      store.setShowSourceModal(true);
+      return;
     }
+    
+    // Check if we have meter details from search or confirmUseNearest
+    if (store.currentMeterDetails && store.currentMeterDetails.latitude && store.currentMeterDetails.longitude) {
+      const meterData = {
+        meterNumber: store.currentMeterDetails.meterNumber || '',
+        accountNumber: store.currentMeterDetails.accountNumber || '',
+        address: store.currentMeterDetails.address || '',
+      };
+      
+      const coords = {
+        latitude: store.currentMeterDetails.latitude,
+        longitude: store.currentMeterDetails.longitude,
+      };
+      
+      navigation.navigate('LeakReportForm', {
+        meterData,
+        coordinates: coords,
+      });
+      return;
+    }
+    
+    // No meter data - show source modal
+    store.setShowSourceModal(true);
   };
 
   const handleUseCurrentPinpoint = () => {
@@ -327,6 +400,13 @@ const ReportScreenInner = observer(({ navigation, params }) => {
     store.setDragMode(false);
     const selectedCoordinates = store.dragPin || store.marker;
     store.setDragPin(null);
+    
+    // Clear nearest meter data when using current pinpoint
+    if (nearestMeterData) {
+      setNearestMeterData(null);
+      store.setCurrentMeterDetails(null);
+      store.setMeterNumber('');
+    }
     
     const normalized = store.currentMeterDetails || null;
     const meterData = normalized && (normalized.meterNumber || normalized.accountNumber)
@@ -358,8 +438,12 @@ const ReportScreenInner = observer(({ navigation, params }) => {
   const handleDragPinOnMap = () => {
     // Clear any existing meter search params to prevent auto-search
     try {
-      navigation.setParams({ meterNumber: null, searchResult: null });
+      navigation.setParams({ meterNumber: null, searchResult: null, fromNearest: null, prefilledData: null });
     } catch (e) { /* noop */ }
+    // Clear the nearest meter data when switching to drag mode
+    setNearestMeterData(null);
+    store.setCurrentMeterDetails(null);
+    store.setMeterNumber('');
     store.startDragMode();
   };
 
@@ -411,22 +495,23 @@ const ReportScreenInner = observer(({ navigation, params }) => {
     <SafeAreaView style={styles.safe} edges={[]}>
       <StatusBar barStyle="light-content" backgroundColor="#1e5a8e" translucent />
       
-      {/* Header/Navbar */}
+      {/* Header with Gradient */}
       <LinearGradient
         colors={['#1e5a8e', '#2d7ab8']}
         style={styles.header}
       >
+        <TouchableOpacity 
+          onPress={() => navigation.navigate('ReportHome')} 
+          style={styles.backButton}
+        >
+          <Ionicons name="arrow-back" size={24} color="#fff" />
+        </TouchableOpacity>
         <View style={styles.headerLeft}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={22} color="#fff" />
-          </TouchableOpacity>
           <View>
             <Text style={styles.headerTitle}>Report & Map</Text>
+            <Text style={styles.headerSubtitle}>Search meter or pick location</Text>
           </View>
         </View>
-        <TouchableOpacity style={styles.headerAction}>
-          <Ionicons name="share-outline" size={22} color="#fff" />
-        </TouchableOpacity>
       </LinearGradient>
 
       <ScrollView 
@@ -436,14 +521,14 @@ const ReportScreenInner = observer(({ navigation, params }) => {
       >
         {/* Search bar */}
         <View style={styles.searchRow}>
-        <View style={styles.searchInputWrap}>
+          <View style={styles.searchInputWrap}>
           <Ionicons name="search" size={18} color="#9aa5b1" style={{ marginRight: 8 }} />
           <TextInput
             style={styles.searchInput}
             placeholder="Enter meter number..."
             placeholderTextColor="#9aa5b1"
             value={store.meterNumber}
-            onChangeText={store.setMeterNumber}
+            onChangeText={(text) => store.setMeterNumber(text)}
             onSubmitEditing={searchMeter}
             returnKeyType="search"
             editable={!store.searching}
@@ -469,8 +554,8 @@ const ReportScreenInner = observer(({ navigation, params }) => {
           longitude={store.marker.longitude}
           zoom={15}
           markers={[
-            // Add selected meter marker if available
-            ...(store.currentMeterDetails?.latitude && store.currentMeterDetails?.longitude ? [{
+            // Add selected meter marker if available (from search or confirmUseNearest)
+            ...(store.currentMeterDetails?.latitude && store.currentMeterDetails?.longitude && !store.dragMode ? [{
               latitude: store.currentMeterDetails.latitude,
               longitude: store.currentMeterDetails.longitude,
               title: '🚰 Selected Meter',
@@ -478,14 +563,22 @@ const ReportScreenInner = observer(({ navigation, params }) => {
               color: '#10b981',
               label: '📍'
             }] : []),
-            // Add drag pin if in drag mode
+            // Add drag pin if in drag mode - make it prominent
             ...(store.dragPin ? [{
               latitude: store.dragPin.latitude,
               longitude: store.dragPin.longitude,
-              title: store.dragMode ? 'Drag to set location' : 'Selected Location',
-              description: `Lat: ${store.dragPin.latitude.toFixed(4)}, Lon: ${store.dragPin.longitude.toFixed(4)}`
+              title: store.dragMode ? '📍 Drag to set location' : '✅ Selected Location',
+              description: `Lat: ${store.dragPin.latitude.toFixed(4)}, Lon: ${store.dragPin.longitude.toFixed(4)}`,
+              color: store.dragMode ? '#f59e0b' : '#10b981',
+              label: store.dragMode ? '📌' : '✓'
             }] : [])
           ]}
+          polylines={routeCoordinates.length > 0 ? [{
+            coordinates: routeCoordinates.map(coord => [coord.latitude, coord.longitude]),
+            color: '#3b82f6',
+            weight: 5,
+            opacity: 0.8
+          }] : []}
           userLocation={{ latitude: store.marker.latitude, longitude: store.marker.longitude }}
           showUserLocation={true}
           onMapPress={handleMapPress}
@@ -535,58 +628,6 @@ const ReportScreenInner = observer(({ navigation, params }) => {
               <TouchableOpacity style={styles.modalCancel} onPress={() => store.setShowSourceModal(false)} activeOpacity={0.8}>
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-
-        {/* Nearest Meter Confirmation Modal */}
-  <Modal visible={store.nearestModalVisible} animationType="fade" transparent onRequestClose={cancelNearestModal}>
-          {/* Use centered overlay when showing success for a cleaner look */}
-          <View style={store.nearestSuccess ? [styles.modalOverlay, { justifyContent: 'center' }] : styles.modalOverlay}>
-            <View style={[ store.nearestSuccess ? styles.centeredModalCard : styles.modalCard, { padding: 20, paddingBottom: 20 + insets.bottom }]}>              
-              {!store.nearestSuccess ? (
-                <>
-                  <Text style={styles.modalTitle}>Nearest Meter Found</Text>
-                  {store.nearestCandidate ? (
-                    <View style={{ alignItems: 'center', marginBottom: 12 }}>
-                      <Text style={{ fontSize: 16, fontWeight: '700' }}>{store.nearestCandidate.id}</Text>
-                      <Text style={{ color: '#6b7280', marginTop: 6 }}>Approximately {store.nearestCandidate.distance} m away</Text>
-                    </View>
-                  ) : null}
-
-                  <View style={{ flexDirection: 'row', gap: 12 }}>
-                    <TouchableOpacity style={[styles.modalSecondaryBtn, { flex: 1 }]} onPress={cancelNearestModal} activeOpacity={0.85}>
-                      <Text style={styles.modalCancelText}>Cancel</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.modalPrimaryLarge, { flex: 1 }]} onPress={confirmUseNearest}>
-                      <LinearGradient colors={[ '#1e5a8e', '#0f4a78' ]} style={styles.modalPrimaryGradient}>
-                        <Text style={styles.modalPrimaryText}>Use This Meter</Text>
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  </View>
-                </>
-              ) : (
-                // Improved, centered dialog-style success card
-                <View style={styles.simpleSuccessCard}>
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
-                    <View style={styles.simpleIconCircle}>
-                      <Ionicons name="checkmark" size={18} color="#fff" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.simpleSuccessTitle}>Nearest meter selected</Text>
-                      {store.nearestCandidate ? (
-                        <Text style={styles.simpleSuccessText}>Meter {store.nearestCandidate.id} selected ({store.nearestCandidate.distance} m)</Text>
-                      ) : null}
-                    </View>
-                  </View>
-
-                  <View style={styles.simpleOkRow}>
-                    <TouchableOpacity onPress={closeNearestSuccess} style={styles.simpleOkBtn} activeOpacity={0.85}>
-                      <Text style={styles.simpleOkText}>OK</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
             </View>
           </View>
         </Modal>
@@ -755,7 +796,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#f0f4f8' },
   scrollView: { flex: 1 },
-  scrollContent: { paddingBottom: 100, paddingTop: 50 },
+  scrollContent: { paddingBottom: 100 },
   headerSafe: {
     position: 'absolute',
     top: 0,
@@ -765,27 +806,26 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 16,
     paddingTop: 50,
   },
+  backButton: {
+    position: 'absolute',
+    left: 16,
+    top: 50,
+    padding: 8,
+    zIndex: 10,
+  },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
-  },
-  backBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
   },
-  headerTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  headerSubtitle: { color: 'rgba(255,255,255,0.9)', fontSize: 12, marginTop: 2 },
+  headerTitle: { color: '#fff', fontSize: 20, fontWeight: '700', textAlign: 'center' },
+  headerSubtitle: { color: 'rgba(255,255,255,0.9)', fontSize: 13, marginTop: 2, textAlign: 'center' },
   headerAction: {
     width: 44,
     height: 44,
@@ -871,7 +911,7 @@ const styles = StyleSheet.create({
   mapWrap: {
     marginTop: 12,
     marginHorizontal: 16,
-    height: 300,
+    height: 400,
     borderRadius: 20,
     overflow: 'hidden',
     backgroundColor: '#e5e7eb',

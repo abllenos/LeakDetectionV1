@@ -1,6 +1,6 @@
 {
   "name": "leakdetection",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "start": "expo start",
@@ -18,16 +18,16 @@
     "@react-navigation/native": "^6.1.18",
     "@react-navigation/stack": "^6.4.1",
     "axios": "^1.12.2",
-    "expo": "^54.0.23",
+    "expo": "~54.0.25",
     "expo-constants": "~18.0.10",
     "expo-device": "~8.0.9",
-    "expo-file-system": "~19.0.11",
+    "expo-file-system": "~19.0.19",
     "expo-font": "~14.0.9",
     "expo-image-picker": "~17.0.8",
     "expo-linear-gradient": "~15.0.7",
     "expo-location": "~19.0.7",
     "expo-task-manager": "~14.0.8",
-    "expo-updates": "~29.0.12",
+    "expo-updates": "~29.0.13",
     "mobx": "^6.13.5",
     "mobx-react-lite": "^4.1.1",
     "react": "19.1.0",
@@ -39,7 +39,7 @@
     "react-native-screens": "~4.16.0",
     "react-native-svg": "15.12.1",
     "react-native-web": "^0.21.0",
-    "react-native-webview": "^13.16.0"
+    "react-native-webview": "^13.15.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.0",

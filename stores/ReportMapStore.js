@@ -102,6 +102,7 @@ export class ReportMapStore {
   }
 
   setMeterNumber(value) {
+    console.log('🔢 setMeterNumber called with:', value);
     this.meterNumber = value;
   }
 
@@ -118,6 +119,8 @@ export class ReportMapStore {
   }
 
   setCurrentMeterDetails(value) {
+    console.log('🎯 setCurrentMeterDetails called with:', value);
+    console.trace('Call stack:');
     this.currentMeterDetails = value;
   }
 
@@ -257,14 +260,21 @@ export class ReportMapStore {
     const parsedLat = latitude !== null && latitude !== undefined && latitude !== '' ? parseFloat(latitude) : null;
     const parsedLng = longitude !== null && longitude !== undefined && longitude !== '' ? parseFloat(longitude) : null;
 
-    return {
-      meterNumber: r.meterNumber || r.MeterNumber || r.meter_no || r.meterNo || r.meter || r.meter_no_string || '',
-      accountNumber: r.accountNumber || r.AccountNumber || r.accountNo || r.account_number || r.account || r.account_no_string || '',
-      address: r.address || r.Address || r.fullAddress || r.customerAddress || r.location || r.address_line || '',
+    const normalized = {
+      meterNumber: r.meterNumber || r.MeterNumber || r.meter_no || r.meterNo || r.meter || r.meter_no_string || r.meterSerial || r.meter_serial || '',
+      accountNumber: r.accountNumber || r.AccountNumber || r.accountNo || r.account_number || r.account || r.account_no_string || r.acctNo || r.acct_no || '',
+      address: r.address || r.Address || r.fullAddress || r.customerAddress || r.location || r.address_line || r.street || r.addressLine || r.completeAddress || '',
+      dma: r.dma || r.DMA || r.districtMeteredArea || r.district || '',
       latitude: parsedLat,
       longitude: parsedLng,
       _raw: r,
     };
+
+    // Log the normalized result to debug
+    console.log('Normalized meter result:', normalized);
+    console.log('Raw data:', r);
+
+    return normalized;
   }
 
   selectSearchResult(result) {
@@ -279,17 +289,13 @@ export class ReportMapStore {
         longitudeDelta: 0.01,
       };
       this.region = nextRegion;
-      this.marker = { latitude: nextRegion.latitude, longitude: nextRegion.longitude };
+      // DO NOT update marker - it should stay at user's current location
+      // this.marker stays as the user's location for the blue pin
       this.coordsLabel = `${nextRegion.latitude.toFixed(6)}, ${nextRegion.longitude.toFixed(6)}`;
     }
 
     this.meterNumber = normalized?.meterNumber || normalized?.accountNumber || '';
     this.currentMeterDetails = normalized;
-
-    Alert.alert(
-      'Meter Found',
-      `Account: ${normalized?.accountNumber || 'N/A'}\nMeter: ${normalized?.meterNumber || 'N/A'}\nAddress: ${normalized?.address || 'N/A'}`
-    );
 
     return normalized;
   }
@@ -302,13 +308,16 @@ export class ReportMapStore {
   }
 
   confirmStartDrag() {
+    console.log('🎯 confirmStartDrag called, setting dragMode to true');
     this.dragMode = true;
-    // Offset the drag pin to the northeast by a larger amount to make it clearly visible
-    // 0.003 degrees ≈ 333 meters offset - enough to see at default zoom
+    // Offset the drag pin slightly to make it visible but close to current location
+    // 0.0005 degrees ≈ 55 meters offset - visible but nearby
     this.dragPin = {
-      latitude: this.region.latitude + 0.003,
-      longitude: this.region.longitude + 0.003,
+      latitude: this.region.latitude + 0.0005,
+      longitude: this.region.longitude + 0.0005,
     };
+    console.log('📌 Drag pin created at:', this.dragPin);
+    console.log('🔧 dragMode is now:', this.dragMode);
     this.showDragConfirmModal = false;
   }
 
@@ -334,7 +343,9 @@ export class ReportMapStore {
     };
     this.marker = next;
     this.coordsLabel = `${next.latitude.toFixed(6)}, ${next.longitude.toFixed(6)}`;
-    this.nearestSuccess = true;
+    // Don't show success modal - directly close the modal
+    this.nearestModalVisible = false;
+    this.nearestSuccess = false;
     
     this.currentMeterDetails = this.normalizeMeterResult({
       meterNumber: this.nearestCandidate.id || this.nearestCandidate.meterNumber || '',

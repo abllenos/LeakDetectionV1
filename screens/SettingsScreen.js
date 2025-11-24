@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,8 @@ import { forceCheckNewData } from '../services/dataChecker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { observer } from 'mobx-react-lite';
 import { useSettingsStore, useOfflineStore } from '../stores/RootStore';
+import NotificationBanner from '../components/NotificationBanner';
+import { useFocusEffect } from '@react-navigation/native';
 
 const SettingsScreen = observer(({ navigation }) => {
   const store = useSettingsStore();
@@ -28,25 +30,17 @@ const SettingsScreen = observer(({ navigation }) => {
 
   // Helper function to calculate remaining time before auto-logout
   const getRemainingTimeText = () => {
-    if (offlineStore.isOnline) {
-      return 'N/A (Currently online)';
-    }
-    
-    if (!offlineStore.lastOnlineTime) {
-      return 'N/A';
-    }
+    if (offlineStore.isOnline) return 'N/A (Currently online)';
+    if (!offlineStore.lastOnlineTime) return 'N/A';
 
     const OFFLINE_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24 hours
     const offlineDuration = Date.now() - offlineStore.lastOnlineTime;
     const remainingMs = OFFLINE_TIMEOUT_MS - offlineDuration;
 
-    if (remainingMs <= 0) {
-      return 'Session expired';
-    }
+    if (remainingMs <= 0) return 'Session expired';
 
     const hours = Math.floor(remainingMs / (60 * 60 * 1000));
     const minutes = Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000));
-
     return `${hours}h ${minutes}m`;
   };
 
@@ -56,44 +50,47 @@ const SettingsScreen = observer(({ navigation }) => {
     store.loadPreset();
 
     const interval = setInterval(() => {
-      if (store.clientLoading) {
-        store.checkCachedData();
-      }
+      if (store.clientLoading) store.checkCachedData();
     }, 3000);
     return () => clearInterval(interval);
-  }, [store.clientLoading]);
+  }, [store]);
 
-  const handleLogout = () => {
-    store.setLogoutModalVisible(true);
-  };
+  useFocusEffect(
+    React.useCallback(() => {
+      store.checkCachedData();
+    }, [])
+  );
+
+  const handleLogout = () => store.setLogoutModalVisible(true);
 
   const confirmLogout = async () => {
-    // Stop location tracking
     stopLocationTracking();
-    
-    // Clear authentication tokens
     await logout();
-    
     store.setLogoutModalVisible(false);
-    // Navigate back to splash screen and reset the navigation stack
-    navigation.reset({
-      index: 0,
-      routes: [{ name: 'Splash' }],
-    });
+    navigation.reset({ index: 0, routes: [{ name: 'Splash' }] });
   };
 
-  const cancelLogout = () => {
-    store.setLogoutModalVisible(false);
+  const cancelLogout = () => store.setLogoutModalVisible(false);
+
+  const handleClearCache = () => {
+    Alert.alert(
+      'Clear Map Cache',
+      'This will remove all offline map tiles cached on your device. You can re-download them later.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Clear Cache', 
+          style: 'destructive',
+          onPress: () => store.confirmClearCache && store.confirmClearCache()
+        }
+      ]
+    );
   };
 
   return (
-  <View style={styles.safe}>
+    <View style={styles.safe}>
       <StatusBar barStyle="light-content" backgroundColor="#1e5a8e" translucent />
-      {/* Header with Gradient */}
-      <LinearGradient
-        colors={['#1e5a8e', '#2d7ab8']}
-        style={styles.headerRow}
-      >
+      <LinearGradient colors={["#1e5a8e", "#2d7ab8"]} style={styles.headerRow}>
         <View>
           <Text style={styles.title}>Settings</Text>
           <Text style={styles.subtitle}>App configuration and preferences</Text>
@@ -102,10 +99,11 @@ const SettingsScreen = observer(({ navigation }) => {
           <Ionicons name="settings" size={22} color="#fff" />
         </View>
       </LinearGradient>
-      
-      <ScrollView contentContainerStyle={styles.container}>
 
-        {/* Offline Maps Card */}
+      <NotificationBanner />
+
+      <ScrollView contentContainerStyle={styles.container}>
+        {/* Offline Maps Card with download progress and controls */}
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <Ionicons name="map" size={18} color="#1e5a8e" />
@@ -122,7 +120,7 @@ const SettingsScreen = observer(({ navigation }) => {
           <View style={styles.row}>
             <Text style={styles.label}>Current Mode:</Text>
             <View style={[styles.statusBadge, { backgroundColor: offlineStore.isOnline ? '#d1fae5' : '#fee2e2' }]}>
-              <Text style={[styles.statusText, { color: offlineStore.isOnline ? '#059669' : '#dc2626' }]}>
+              <Text style={[styles.statusText, { color: offlineStore.isOnline ? '#059669' : '#dc2626' }]}> 
                 {offlineStore.isOnline ? 'Using Online Tiles' : (store.cachedTiles > 0 ? 'Using Offline Tiles' : 'No Connection')}
               </Text>
             </View>
@@ -139,24 +137,41 @@ const SettingsScreen = observer(({ navigation }) => {
             </View>
           </View>
 
-          <View style={styles.actionsRow}>
-            <TouchableOpacity style={styles.primaryBtn} onPress={store.updateMaps.bind(store)} disabled={store.mapsLoading && !store.mapsPaused}>
-              {store.mapsLoading && !store.mapsPaused ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Text style={styles.primaryBtnText}>
-                    {store.mapsPaused ? 'Resume Download' : 'Update Maps'}
-                  </Text>
-                  {store.mapsPaused && <Ionicons name="play-circle" size={18} color="#fff" />}
-                </View>
+          {store.mapsLoading || store.mapsPaused ? (
+            <View style={{ marginTop: 16 }}>
+              <View style={styles.progressBarBackground}>
+                <View style={[styles.progressBarFill, { width: `${store.updateProgress}%` }]} />
+              </View>
+              <Text style={styles.progressText}>{store.updateProgress}%</Text>
+              {store.mapsDownloadSpeed > 0 && (
+                <Text style={styles.speedText}>{store.mapsDownloadSpeed} tiles/sec {store.mapsPaused && '(Paused)'}</Text>
               )}
-            </TouchableOpacity>
+              <View style={styles.actionsRow}>
+                <TouchableOpacity
+                  style={[styles.primaryBtn, store.mapsPaused && { backgroundColor: '#10b981' }]}
+                  onPress={() => { if (store.mapsPaused) store.resumeMapDownload(); else store.pauseMapDownload(); }}
+                >
+                  <Ionicons name={store.mapsPaused ? 'play' : 'pause'} size={18} color="#fff" style={{ marginRight: 8 }} />
+                  <Text style={styles.primaryBtnText}>{store.mapsPaused ? 'Resume' : 'Pause'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.outlineBtn} onPress={() => store.cancelMapDownload && store.cancelMapDownload()}>
+                  <Text style={styles.outlineBtnText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
 
-            <TouchableOpacity style={styles.outlineBtn} onPress={store.clearCache.bind(store)}>
-              <Text style={styles.outlineBtnText}>Clear Cache</Text>
+          {store.updateSuccess && (<Text style={styles.successText}>Maps updated successfully ✅</Text>)}
+
+          {!store.mapsLoading && !store.mapsPaused && !store.updateSuccess && (
+            <TouchableOpacity style={styles.primaryBtnFull} onPress={() => store.startMapDownload && store.startMapDownload()}>
+              <Text style={styles.primaryBtnText}>Update Maps</Text>
             </TouchableOpacity>
-          </View>
+          )}
+
+          <TouchableOpacity style={styles.outlineBtnFullSpaced} onPress={handleClearCache}>
+            <Text style={styles.outlineBtnText}>Clear Cache</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Customer Data Card */}
@@ -371,101 +386,7 @@ const SettingsScreen = observer(({ navigation }) => {
           </View>
         </View>
       </Modal>
-      {/* Update Maps Modal */}
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={store.updateModalVisible}
-        onRequestClose={() => store.setUpdateModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.updateModalContainer}>
-            <Text style={styles.modalTitle}>Update Offline Maps</Text>
-            <Text style={styles.modalMessageSmall}>This will download the latest offline map tiles for faster mapping when you're offline.</Text>
-
-            {/* Progress area */}
-            <View style={styles.progressWrap}>
-              {!store.updateSuccess ? (
-                <>
-                  <View style={styles.progressBarBackground}>
-                    <View style={[styles.progressBarFill, { width: `${store.updateProgress}%` }]} />
-                  </View>
-                  <Text style={styles.progressText}>{store.updateProgress}%</Text>
-                  {store.mapsLoading && store.mapsDownloadSpeed > 0 && (
-                    <Text style={styles.speedText}>
-                      {store.mapsDownloadSpeed} tiles/sec {store.mapsPaused && '(Paused)'}
-                    </Text>
-                  )}
-                </>
-              ) : (
-                <Text style={styles.successText}>Maps updated successfully ✅</Text>
-              )}
-            </View>
-
-            {!store.mapsLoading && !store.mapsPaused ? (
-              <View style={styles.modalButtonRow}>
-                <TouchableOpacity
-                  style={styles.modalCancelButton}
-                  onPress={() => store.setUpdateModalVisible(false)}
-                >
-                  <Text style={styles.modalCancelButtonText}>Cancel</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.modalPrimaryButton}
-                  onPress={() => {
-                    if (store.updateSuccess) {
-                      store.setUpdateModalVisible(false);
-                      store.setUpdateProgress(0);
-                      store.setUpdateSuccess(false);
-                    } else {
-                      store.startMapDownload();
-                    }
-                  }}
-                >
-                  <LinearGradient
-                    colors={store.updateSuccess ? ['#10b981', '#059669'] : ['#1e5a8e', '#0f4a78']}
-                    style={styles.modalPrimaryGradient}
-                  >
-                    <Text style={styles.modalPrimaryButtonText}>{store.updateSuccess ? 'Done' : 'Start Download'}</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <View style={styles.modalButtonRow}>
-                {store.mapsPaused && (
-                  <TouchableOpacity
-                    style={styles.modalCancelButton}
-                    onPress={() => store.setUpdateModalVisible(false)}
-                  >
-                    <Text style={styles.modalCancelButtonText}>Close</Text>
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity
-                  style={[
-                    styles.modalPauseButton,
-                    store.mapsPaused && styles.modalResumeButton,
-                    store.mapsPaused && { flex: 1 }
-                  ]}
-                  onPress={() => {
-                    if (store.mapsPaused) store.resumeMapDownload(); else store.pauseMapDownload();
-                  }}
-                >
-                  <Ionicons 
-                    name={store.mapsPaused ? 'play' : 'pause'} 
-                    size={18} 
-                    color="#fff" 
-                    style={{ marginRight: 8 }}
-                  />
-                  <Text style={styles.modalPauseButtonText}>
-                    {store.mapsPaused ? 'Resume' : 'Pause'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        </View>
-      </Modal>
+      {/* Update Maps Modal fully removed; progress now shown in card */}
       <Modal
         animationType="fade"
         transparent={true}
@@ -547,7 +468,7 @@ const styles = StyleSheet.create({
 
   row: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
-  actionsRow: { flexDirection: 'row', marginTop: 12, gap: 10 },
+  actionsRow: { flexDirection: 'row', marginTop: 16, gap: 12 },
   actionsCol: { marginTop: 12 },
 
   label: { color: '#6b7280', fontSize: 14 },
@@ -558,7 +479,7 @@ const styles = StyleSheet.create({
   statusText: { color: '#1e5a8e', fontWeight: '700' },
 
   primaryBtn: { backgroundColor: '#1e5a8e', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10, alignItems: 'center', justifyContent: 'center', flex: 1, marginRight: 8 },
-  primaryBtnFull: { backgroundColor: '#1e5a8e', paddingVertical: 14, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
+  primaryBtnFull: { backgroundColor: '#1e5a8e', paddingVertical: 14, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
   primaryBtnText: { color: '#fff', fontWeight: '700' },
   secondaryBtnFull: {
     paddingVertical: 14,
@@ -576,7 +497,8 @@ const styles = StyleSheet.create({
   },
 
   outlineBtn: { borderWidth: 1.5, borderColor: '#f43f5e', paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  outlineBtnFull: { borderWidth: 1.5, borderColor: '#f43f5e', paddingVertical: 14, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginTop: 6 },
+  outlineBtnFull: { borderWidth: 1.5, borderColor: '#f43f5e', paddingVertical: 14, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
+  outlineBtnFullSpaced: { borderWidth: 1.5, borderColor: '#f43f5e', paddingVertical: 14, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
   outlineBtnText: { color: '#f43f5e', fontWeight: '700' },
 
   metaRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
@@ -609,6 +531,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#fff',
+  clearConfirmRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+  },
     letterSpacing: 0.5,
   },
   logoutBtn: {

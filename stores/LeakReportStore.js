@@ -17,6 +17,8 @@ class LeakReportStore {
   causeOfLeak = '';
   causeOther = '';
   dma = '';
+  flagProjectLeak = null;
+  featuredId = '';
 
   // UI state
   showDmaModal = false;
@@ -41,6 +43,8 @@ class LeakReportStore {
       causeOfLeak: observable,
       causeOther: observable,
       dma: observable,
+      flagProjectLeak: observable,
+      featuredId: observable,
       showDmaModal: observable,
       dmaOptions: observable,
       dmaLoading: observable,
@@ -63,6 +67,8 @@ class LeakReportStore {
       setCauseOfLeak: action.bound,
       setCauseOther: action.bound,
       setDma: action.bound,
+      setFlagProjectLeak: action.bound,
+      setFeaturedId: action.bound,
       setShowDmaModal: action.bound,
       setCoveringExpanded: action.bound,
       setCauseExpanded: action.bound,
@@ -90,6 +96,8 @@ class LeakReportStore {
   setCauseOfLeak(v) { this.causeOfLeak = v; }
   setCauseOther(v) { this.causeOther = v; }
   setDma(v) { this.dma = v; }
+  setFlagProjectLeak(v) { this.flagProjectLeak = v; if (v === 0) this.featuredId = ''; }
+  setFeaturedId(v) { this.featuredId = v; }
   setShowDmaModal(v) { this.showDmaModal = v; }
   setCoveringExpanded(v) { this.coveringExpanded = v; }
   setCauseExpanded(v) { this.causeExpanded = v; }
@@ -107,6 +115,8 @@ class LeakReportStore {
     this.causeOfLeak = '';
     this.causeOther = '';
     this.dma = '';
+    this.flagProjectLeak = null;
+    this.featuredId = '';
     this.showDmaModal = false;
     this.dmaOptions = [];
     this.dmaLoading = false;
@@ -169,6 +179,8 @@ class LeakReportStore {
         leakPhotos: this.leakPhotos,
         landmarkPhoto: this.landmarkPhoto,
         pressure: this.pressure,
+        flagProjectLeak: this.flagProjectLeak,
+        featuredId: this.featuredId,
         meterData,
         coordinates,
         geom,
@@ -227,6 +239,8 @@ class LeakReportStore {
           leakPhotos: this.leakPhotos,
           landmarkPhoto: this.landmarkPhoto,
           pressure: this.pressure,
+          flagProjectLeak: this.flagProjectLeak,
+          featuredId: this.featuredId,
           meterData: coordinates && coordinates.latitude ? { coordinates } : null,
           coordinates,
           geom: coordinates,

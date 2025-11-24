@@ -9,7 +9,7 @@
       "web"
     ],
     "orientation": "portrait",
-  "icon": "./assets/applogoleak.jpeg",
+  "icon": "./assets/leakdetect.png",
     "updates": {
       "enabled": false
     },
@@ -37,7 +37,7 @@
         "WRITE_EXTERNAL_STORAGE"
       ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/applogoleak.jpeg",
+        "foregroundImage": "./assets/leakdetect.png",
         "backgroundColor": "#ffffff"
       },
       "config": {

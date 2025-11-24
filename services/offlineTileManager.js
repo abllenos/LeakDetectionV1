@@ -1,13 +1,14 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Directory, Paths, File } from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import notificationStore from '../stores/NotificationStore';
 
 // Tile configuration for Davao City area
 const DAVAO_BOUNDS = {
-  minLat: 6.9,
-  maxLat: 7.2,
-  minLon: 125.5,
-  maxLon: 125.7,
+  minLat: 6.9679, // covers full city area
+  maxLat: 7.4135,
+  minLon: 125.2244,
+  maxLon: 125.6862,
 };
 
 // Zoom levels 10-18 for detailed street-level coverage
@@ -89,24 +90,24 @@ const downloadTile = async (z, x, y, source = 'osm') => {
   const filePath = getTileFilePath(z, x, y, source);
   const sourceUrl = TILE_SOURCES[source] || TILE_SOURCES.osm;
   const url = sourceUrl.replace('{z}', z).replace('{x}', x).replace('{y}', y);
-  
   try {
+    // Check if file already exists
+    const info = await FileSystem.getInfoAsync(filePath);
+    if (info.exists && info.size > 0) {
+      // File already exists, skip download
+      return true;
+    }
     // Ensure directory exists - create parent directories recursively
     const cacheDir = getTileCacheDir();
     if (!cacheDir.exists) cacheDir.create();
-    
     const sourceDir = new Directory(cacheDir, source);
     if (!sourceDir.exists) sourceDir.create();
-    
     const zoomDir = new Directory(sourceDir, String(z));
     if (!zoomDir.exists) zoomDir.create();
-    
     const xDir = new Directory(zoomDir, String(x));
     if (!xDir.exists) xDir.create();
-    
     // Download tile using the new File.downloadFileAsync method
     const file = await File.downloadFileAsync(url, xDir);
-    
     // Verify file was actually created
     if (file.exists && file.size > 0) {
       return true;
@@ -115,6 +116,10 @@ const downloadTile = async (z, x, y, source = 'osm') => {
       return false;
     }
   } catch (error) {
+    if (error.message && error.message.includes('Destination already exists')) {
+      // Treat as success if file exists
+      return true;
+    }
     console.warn(`Failed to download tile ${z}/${x}/${y}:`, error.message);
     return false;
   }
@@ -131,9 +136,10 @@ export const downloadTilesForArea = async (onProgress, isPaused) => {
   console.log(`[OfflineTiles] Zoom levels: ${ZOOM_LEVELS.join(', ')}`);
   console.log(`[OfflineTiles] Bounds:`, DAVAO_BOUNDS);
   
-  // Batch size for concurrent downloads - increased for faster downloads
-  const BATCH_SIZE = 50; // Download 50 tiles at once (increased from 10)
+  // Batch size for concurrent downloads - optimized for Android stability
+  const BATCH_SIZE = 50; // Download 50 tiles at once (balanced for Android performance)
   
+  let fatalError = null;
   for (const zoom of ZOOM_LEVELS) {
     const minTile = latLonToTile(DAVAO_BOUNDS.maxLat, DAVAO_BOUNDS.minLon, zoom);
     const maxTile = latLonToTile(DAVAO_BOUNDS.minLat, DAVAO_BOUNDS.maxLon, zoom);
@@ -158,31 +164,58 @@ export const downloadTilesForArea = async (onProgress, isPaused) => {
         }
         console.log('[OfflineTiles] Download resumed');
       }
-      
+
       const batch = tilesToDownload.slice(i, i + BATCH_SIZE);
-      
-      // Download batch concurrently
-      const results = await Promise.all(
-        batch.map(async ({ x, y, z }) => {
-          const exists = await checkTileExists(z, x, y);
-          if (!exists) {
-            const success = await downloadTile(z, x, y);
-            return success;
-          }
-          return true; // Already exists, count as success
-        })
-      );
-      
+
+      // Download batch concurrently with error handling
+      let results;
+      try {
+        results = await Promise.all(
+          batch.map(async ({ x, y, z }) => {
+            try {
+              const exists = await checkTileExists(z, x, y);
+              if (!exists) {
+                const success = await downloadTile(z, x, y);
+                return success;
+              }
+              return true; // Already exists, count as success
+            } catch (err) {
+              console.warn(`[OfflineTiles] Failed to download tile z:${z} x:${x} y:${y}`, err);
+              return false;
+            }
+          })
+        );
+      } catch (batchError) {
+        fatalError = batchError;
+        console.error('[OfflineTiles] Fatal error during batch download:', batchError);
+        notificationStore.addNotification('error', 'Map download failed: ' + (batchError?.message || 'Unknown error'));
+        break;
+      }
+
       // Count results
-      results.forEach(success => {
-        if (success) {
-          successCount++;
-        } else {
-          failCount++;
-        }
-        downloadedCount++;
-      });
-      
+      if (results) {
+        results.forEach(success => {
+          if (success) {
+            successCount++;
+          } else {
+            failCount++;
+          }
+          downloadedCount++;
+        });
+      }
+
+      // Save incremental metadata after this batch so UI can show cached tile count in real-time
+      try {
+        await AsyncStorage.setItem('offline_tiles_metadata', JSON.stringify({
+          downloadedAt: new Date().toISOString(),
+          totalTiles: successCount,
+          zoomLevels: ZOOM_LEVELS,
+          bounds: DAVAO_BOUNDS,
+        }));
+      } catch (e) {
+        console.warn('[OfflineTiles] Failed to write incremental metadata:', e);
+      }
+
       // Report progress
       if (onProgress) {
         onProgress({
@@ -190,13 +223,22 @@ export const downloadTilesForArea = async (onProgress, isPaused) => {
           total: totalTiles,
           percentage: Math.round((downloadedCount / totalTiles) * 100),
           successCount,
+          failCount,
+          error: fatalError ? fatalError.message : undefined,
         });
       }
+
+      // Add a short delay between batches to avoid overwhelming device/network
+      await new Promise(resolve => setTimeout(resolve, 250)); // 250ms delay
+      if (fatalError) break;
     }
   }
-  
+
+  if (fatalError) {
+    notificationStore.addNotification('error', 'Map download stopped due to error.');
+    return { total: downloadedCount, success: successCount, error: fatalError.message };
+  }
   console.log(`[OfflineTiles] Download complete: ${successCount} success, ${failCount} failed, ${totalTiles} total`);
-  
   // Save metadata
   await AsyncStorage.setItem('offline_tiles_metadata', JSON.stringify({
     downloadedAt: new Date().toISOString(),
@@ -204,10 +246,9 @@ export const downloadTilesForArea = async (onProgress, isPaused) => {
     zoomLevels: ZOOM_LEVELS,
     bounds: DAVAO_BOUNDS,
   }));
-  
   console.log(`[OfflineTiles] Metadata saved: ${successCount} tiles`);
   return { total: totalTiles, success: successCount };
-};
+}
 
 // Calculate storage used
 export const calculateStorageUsed = async () => {
@@ -246,13 +287,45 @@ export const clearTileCache = async () => {
   try {
     const cacheDir = getTileCacheDir();
     if (cacheDir.exists) {
-      cacheDir.delete();
+      // Recursively delete all files/subdirectories using Directory.entries()
+      const deleteRecursive = async (dir) => {
+        // Try new API first (Directory.entries())
+        if (dir && typeof dir.entries === 'function') {
+          const entries = await dir.entries();
+          for (const entry of entries) {
+            if (entry.isDirectory) {
+              await deleteRecursive(entry);
+            } else {
+              try { await entry.delete(); } catch (e) { await FileSystem.deleteAsync(entry.uri, { idempotent: true }); }
+            }
+          }
+          try { await dir.delete(); } catch (e) { await FileSystem.deleteAsync(dir.uri, { idempotent: true }); }
+          return;
+        }
+
+        // Fallback for older APIs or non-Directory objects - use legacy readDirectoryAsync
+        const dirUri = dir?.uri || dir;
+        if (!dirUri) throw new Error('Invalid directory for deletion');
+        const entriesNames = await FileSystem.readDirectoryAsync(dirUri);
+        for (const name of entriesNames) {
+          const entryPath = `${dirUri}/${name}`;
+          const info = await FileSystem.getInfoAsync(entryPath);
+          if (info.isDirectory) {
+            await deleteRecursive({ uri: entryPath });
+          } else {
+            await FileSystem.deleteAsync(entryPath, { idempotent: true });
+          }
+        }
+        await FileSystem.deleteAsync(dirUri, { idempotent: true });
+      };
+      await deleteRecursive(cacheDir);
     }
     await AsyncStorage.removeItem('offline_tiles_metadata');
     console.log('Tile cache cleared');
     return true;
   } catch (error) {
     console.error('Failed to clear tile cache:', error);
+    notificationStore.addNotification('error', 'Failed to clear tile cache: ' + (error?.message || 'Unknown error'));
     return false;
   }
 };

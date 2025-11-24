@@ -44,9 +44,8 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
             }
             
             const result = await ImagePicker.launchCameraAsync({
-              allowsEditing: true,
+              allowsEditing: false,
               quality: 0.8,
-              aspect: [4, 3],
             });
             if (!result.canceled && result.assets[0]) {
               form.addLeakPhoto(result.assets[0].uri);
@@ -65,9 +64,8 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
             
             const result = await ImagePicker.launchImageLibraryAsync({
               mediaTypes: ImagePicker.MediaTypeOptions.Images,
-              allowsEditing: true,
+              allowsEditing: false,
               quality: 0.8,
-              aspect: [4, 3],
             });
             if (!result.canceled && result.assets[0]) {
               form.addLeakPhoto(result.assets[0].uri);
@@ -103,9 +101,8 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
             }
             
             const result = await ImagePicker.launchCameraAsync({
-              allowsEditing: true,
+              allowsEditing: false,
               quality: 0.8,
-              aspect: [4, 3],
             });
             if (!result.canceled && result.assets[0]) {
               form.setLandmarkPhoto(result.assets[0].uri);
@@ -124,9 +121,8 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
             
             const result = await ImagePicker.launchImageLibraryAsync({
               mediaTypes: ImagePicker.MediaTypeOptions.Images,
-              allowsEditing: true,
+              allowsEditing: false,
               quality: 0.8,
-              aspect: [4, 3],
             });
             if (!result.canceled && result.assets[0]) {
               form.setLandmarkPhoto(result.assets[0].uri);
@@ -167,8 +163,8 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
       Alert.alert('Missing info', 'Please describe the cause of leak.');
       return;
     }
-    if (!form.contactName || !form.contactNumber) {
-      Alert.alert('Missing info', 'Please provide contact person and number.');
+    if (!form.contactName) {
+      Alert.alert('Missing info', 'Please provide contact person.');
       return;
     }
     form.submitting = true;
@@ -191,6 +187,8 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
   leakPhotos: form.leakPhotos,
   landmarkPhoto: form.landmarkPhoto,
   pressure: form.pressure,
+  flagProjectLeak: form.flagProjectLeak,
+  featuredId: form.featuredId,
   meterData,
   coordinates,
   geom: Geom,
@@ -430,6 +428,40 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
           </>
         )}
 
+        {/* Flag Project Leak */}
+        <Text style={styles.sectionLabel}>Flag Project Leak</Text>
+        <View style={styles.buttonGrid}>
+          <TouchableOpacity
+            style={[styles.choiceBtn, form.flagProjectLeak === 0 && styles.choiceBtnActive]}
+            onPress={() => form.setFlagProjectLeak(0)}
+          >
+            <Text style={[styles.choiceBtnText, form.flagProjectLeak === 0 && styles.choiceBtnTextActive]}>Not under POI</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.choiceBtn, form.flagProjectLeak === 1 && styles.choiceBtnActive]}
+            onPress={() => form.setFlagProjectLeak(1)}
+          >
+            <Text style={[styles.choiceBtnText, form.flagProjectLeak === 1 && styles.choiceBtnTextActive]}>Under POI</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Featured ID (shown only when Under POI is selected) */}
+        {form.flagProjectLeak === 1 && (
+          <>
+            <Text style={styles.sectionLabel}>Featured ID</Text>
+            <View style={styles.inputWrap}>
+              <Ionicons name="bookmark-outline" size={18} color="#9aa5b1" style={{ marginRight: 10 }} />
+              <TextInput
+                style={styles.input}
+                placeholder="Enter Featured ID"
+                placeholderTextColor="#9aa5b1"
+                value={form.featuredId}
+                onChangeText={form.setFeaturedId}
+              />
+            </View>
+          </>
+        )}
+
 
         {/* Contact Person */}
         <Text style={styles.sectionLabel}>Contact Person</Text>
@@ -441,20 +473,6 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
             placeholderTextColor="#9aa5b1"
             value={form.contactName}
             onChangeText={form.setContactName}
-          />
-        </View>
-
-        {/* Contact Number */}
-        <Text style={styles.sectionLabel}>Contact Number</Text>
-        <View style={styles.inputWrap}>
-          <Ionicons name="call-outline" size={18} color="#9aa5b1" style={{ marginRight: 10 }} />
-          <TextInput
-            style={styles.input}
-            placeholder="Phone"
-            placeholderTextColor="#9aa5b1"
-            keyboardType="phone-pad"
-            value={form.contactNumber}
-            onChangeText={form.setContactNumber}
           />
         </View>
 

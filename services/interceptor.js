@@ -573,8 +573,11 @@ const generateRefNo = () => {
 const getLeakTypeId = (leakType) => {
   const typeMap = {
     'Mainline': 38,
-    'Service Line': 39,
+    'Serviceline': 39,
+    'Service Line': 39,  // Support both formats
     'After Meter': 40,
+    'Unidentified': 38,  // Default to mainline for unidentified
+    'Others': 38,        // Default to mainline for others
   };
   return typeMap[leakType] || 38; // Default to Mainline
 };

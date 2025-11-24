@@ -101,6 +101,7 @@ export class SettingsStore {
       startMapDownload: action,
       pauseMapDownload: action,
       resumeMapDownload: action,
+      cancelMapDownload: action,
       clearCache: action,
       confirmClearCache: action,
       deleteClientData: action,
@@ -335,12 +336,10 @@ export class SettingsStore {
     try {
       const totalTiles = calculateTileCount();
       console.log(`[OfflineMaps] Starting download of ${totalTiles} tiles for Davao City...`);
-      
       let lastUpdate = Date.now();
       let lastCount = 0;
-      
       await downloadTilesForArea(
-        (progress) => {
+        async (progress) => {
           // Calculate download speed (tiles per second)
           const now = Date.now();
           const timeDiff = (now - lastUpdate) / 1000; // seconds
@@ -350,17 +349,19 @@ export class SettingsStore {
             lastUpdate = now;
             lastCount = progress.current;
           }
-          
           this.updateProgress = progress.percentage;
-          console.log(`[OfflineMaps] Progress: ${progress.current}/${progress.total} (${progress.percentage}%) - ${this.mapsDownloadSpeed} tiles/s`);
+          // Update cachedTiles and storageUsed live
+          const tileCount = await getCachedTileCount();
+          const storage = await calculateStorageUsed();
+          this.cachedTiles = tileCount;
+          this.storageUsed = parseFloat(storage.toFixed(2));
+          console.log(`[OfflineMaps] Progress: ${progress.current}/${progress.total} (${progress.percentage}%) - ${this.mapsDownloadSpeed} tiles/s | ${tileCount} tiles, ${storage.toFixed(2)} MB`);
         },
         () => this.mapsPaused // Pass pause check function
       );
-      
-      // Update stats
+      // Final update
       const tileCount = await getCachedTileCount();
       const storage = await calculateStorageUsed();
-      
       this.cachedTiles = tileCount;
       this.storageUsed = parseFloat(storage.toFixed(2));
       this.mapsStatus = 'Offline Tiles Available';
@@ -368,7 +369,6 @@ export class SettingsStore {
       this.mapsPaused = false;
       this.mapsDownloadSpeed = 0;
       this.updateSuccess = true;
-      
       console.log(`[OfflineMaps] Download complete: ${tileCount} tiles, ${storage.toFixed(2)} MB`);
     } catch (error) {
       console.error('[OfflineMaps] Download failed:', error);
@@ -390,6 +390,28 @@ export class SettingsStore {
     this.mapsPaused = false;
     this.mapsStatus = 'Downloading...';
     console.log('[OfflineMaps] Download resumed');
+  }
+
+  async cancelMapDownload() {
+    console.log('[OfflineMaps] Canceling download...');
+    this.mapsLoading = false;
+    this.mapsPaused = false;
+    this.mapsDownloadSpeed = 0;
+    this.updateProgress = 0;
+    
+    // Update status based on current cache
+    const tileCount = await getCachedTileCount();
+    const storage = await calculateStorageUsed();
+    this.cachedTiles = tileCount;
+    this.storageUsed = parseFloat(storage.toFixed(2));
+    
+    if (tileCount > 0) {
+      this.mapsStatus = 'Offline Tiles Available (Partial)';
+    } else {
+      this.mapsStatus = 'No Offline Tiles';
+    }
+    
+    console.log('[OfflineMaps] Download canceled');
   }
 
   clearCache() {

@@ -310,7 +310,7 @@ const DashboardScreen = observer(({ navigation }) => {
         )}
 
         {/* Overview Section */}
-        <Text style={styles.sectionTitle}>Leak Reports Overview</Text>
+        <Text style={styles.sectionTitle}>Leak Detection Overview</Text>
 
         {/* Stats Cards */}
         <View style={styles.statsContainer}>

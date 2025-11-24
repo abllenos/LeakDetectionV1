@@ -13,6 +13,7 @@ const LeafletMap = ({
   initialCenter = null,
   initialZoom = null,
   markers = [],
+  polylines = [], // Add polylines support
   showUserLocation = true,
   userLocation = null, // Pass user location from React Native
   onMarkerPress,
@@ -61,10 +62,17 @@ const LeafletMap = ({
     <body>
       <div id="map"></div>
       <script>
-        // Initialize map
+        // Initialize map with performance optimizations
         var map = L.map('map', {
           zoomControl: true,
-          attributionControl: true
+          attributionControl: true,
+          preferCanvas: true,
+          tap: true,
+          tapTolerance: 15,
+          zoomSnap: 0.5,
+          zoomDelta: 0.5,
+          wheelPxPerZoomLevel: 120,
+          bounceAtZoomLimits: false
         }).setView([${centerLat}, ${centerLng}], ${mapZoom});
 
         // Add OpenStreetMap tiles
@@ -134,6 +142,22 @@ const LeafletMap = ({
         
         console.log('✅ User location marker added at:', userLocationMarker.latitude, userLocationMarker.longitude);
 
+        // Add polylines (for routes/paths)
+        var polylines = ${JSON.stringify(polylines)};
+        polylines.forEach(function(polyline) {
+          var coordinates = polyline.coordinates || [];
+          var color = polyline.color || '#3b82f6';
+          var weight = polyline.weight || 4;
+          var opacity = polyline.opacity || 0.7;
+          
+          L.polyline(coordinates, {
+            color: color,
+            weight: weight,
+            opacity: opacity,
+            smoothFactor: 1
+          }).addTo(map);
+        });
+
         // Handle map clicks
         map.on('click', function(e) {
           window.ReactNativeWebView.postMessage(JSON.stringify({
@@ -180,6 +204,10 @@ const LeafletMap = ({
         javaScriptEnabled={true}
         domStorageEnabled={true}
         startInLoadingState={true}
+        androidHardwareAccelerationDisabled={false}
+        androidLayerType="hardware"
+        cacheEnabled={true}
+        cacheMode="LOAD_CACHE_ELSE_NETWORK"
         renderLoading={() => (
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
             <ActivityIndicator size="large" color="#2563eb" />

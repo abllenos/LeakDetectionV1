@@ -55,61 +55,62 @@ const ReportHomeScreenInner = observer(({ navigation, params }) => {
     <SafeAreaView style={styles.safe} edges={[]}>
       <StatusBar barStyle="light-content" backgroundColor="#1e5a8e" translucent />
       <LinearGradient
-        colors={["#1e5a8e", "#2d7ab8"]}
+        colors={['#1e5a8e', '#2d7ab8']}
         style={styles.header}
       >
+        <TouchableOpacity 
+          onPress={() => navigation.goBack()} 
+          style={styles.backButton}
+        >
+          <Ionicons name="arrow-back" size={24} color="#fff" />
+        </TouchableOpacity>
         <View style={styles.headerLeft}>
-          <View style={{ width: 44 }} />
           <View>
             <Text style={styles.headerTitle}>Report Leak</Text>
             <Text style={styles.headerSubtitle}>Choose how to report</Text>
           </View>
         </View>
-        <View style={{ width: 44 }} />
       </LinearGradient>
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+        {/* Search bar */}
+        <View style={styles.searchRow}>
+          <View style={styles.searchInputWrap}>
+            <Ionicons name="search" size={18} color="#9aa5b1" style={{ marginRight: 8 }} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Enter meter number..."
+              placeholderTextColor="#9aa5b1"
+              value={store.meterNumber}
+              onChangeText={(text) => store.setMeterNumber(text)}
+              returnKeyType="search"
+              onSubmitEditing={searchMeter}
+              editable={!store.searching}
+            />
+          </View>
+          <TouchableOpacity 
+            style={[styles.searchBtn, store.searching && styles.searchBtnDisabled]} 
+            onPress={searchMeter} 
+            disabled={store.searching}
+          >
+            {store.searching ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.searchBtnText}>Search</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.mapWrap}>
           <LeafletMap
             latitude={store.region.latitude}
             longitude={store.region.longitude}
             zoom={14}
-            markers={store.marker ? [{
-              latitude: store.marker.latitude,
-              longitude: store.marker.longitude,
-              title: 'Current Location'
-            }] : []}
+            markers={[]}
             userLocation={{ latitude: store.region.latitude, longitude: store.region.longitude }}
             showUserLocation={true}
             style={styles.map}
           />
-
-          <View style={styles.searchOverlay}>
-            <View style={styles.searchInputWrap}>
-              <Ionicons name="search" size={18} color="#9aa5b1" style={{ marginRight: 8 }} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Enter meter number..."
-                placeholderTextColor="#9aa5b1"
-                value={store.meterNumber}
-                onChangeText={store.setMeterNumber}
-                returnKeyType="search"
-                onSubmitEditing={searchMeter}
-                editable={!store.searching}
-              />
-            </View>
-            <TouchableOpacity 
-              style={[styles.searchBtn, store.searching && styles.searchBtnDisabled]} 
-              onPress={searchMeter} 
-              disabled={store.searching}
-            >
-              {store.searching ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.searchBtnText}>Search</Text>
-              )}
-            </TouchableOpacity>
-          </View>
         </View>
 
         <View style={styles.optionsSection}>
@@ -188,24 +189,35 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#f0f4f8' },
   scrollView: { flex: 1 },
   scrollContent: { paddingBottom: 24 },
-  header: { paddingHorizontal: 20, paddingVertical: 16, paddingTop: 50 },
-  headerLeft: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    flex: 1, 
-    justifyContent: 'center' 
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    paddingTop: 50,
+  },
+  backButton: {
+    position: 'absolute',
+    left: 16,
+    top: 50,
+    padding: 8,
+    zIndex: 10,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: { color: '#fff', fontSize: 20, fontWeight: '700', textAlign: 'center' },
   headerSubtitle: { color: 'rgba(255,255,255,0.9)', fontSize: 13, marginTop: 2, textAlign: 'center' },
-  mapWrap: { height: 300, backgroundColor: '#ddd', marginHorizontal: 16, marginTop: 16, borderRadius: 16, overflow: 'hidden' },
-  map: { ...StyleSheet.absoluteFillObject },
-  searchOverlay: { 
-    position: 'absolute', 
-    top: 12, 
-    left: 12, 
-    right: 12, 
-    flexDirection: 'row', 
-    alignItems: 'center' 
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 12,
+    gap: 10,
   },
   searchInputWrap: { 
     flex: 1, 
@@ -223,7 +235,6 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, color: '#333', fontSize: 15 },
   searchBtn: { 
-    marginLeft: 10, 
     backgroundColor: '#1e5a8e', 
     height: 44, 
     paddingHorizontal: 18, 
@@ -238,6 +249,19 @@ const styles = StyleSheet.create({
   },
   searchBtnDisabled: { backgroundColor: '#cbd5e1', opacity: 0.6 },
   searchBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  mapWrap: { 
+    height: 400, 
+    backgroundColor: '#ddd', 
+    marginHorizontal: 16, 
+    borderRadius: 16, 
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  map: { ...StyleSheet.absoluteFillObject },
   
   optionsSection: {
     paddingHorizontal: 16,
@@ -252,15 +276,15 @@ const styles = StyleSheet.create({
   sectionSubtitle: {
     fontSize: 14,
     color: '#64748b',
-    marginBottom: 20,
+    marginBottom: 24,
   },
   optionCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fff',
     borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
+    padding: 18,
+    marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,

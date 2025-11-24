@@ -158,7 +158,7 @@ export const startBackgroundLocationTracking = async () => {
       await Location.startLocationUpdatesAsync(LOCATION_TRACKING_TASK, {
         accuracy: Location.Accuracy.Balanced,
         timeInterval: TRACKING_INTERVAL,
-        distanceInterval: 50, // meters
+        distanceInterval: 10, // meters
         showsBackgroundLocationIndicator: false, // Hide iOS indicator
       });
       console.log('✅ Background location tracking started');
