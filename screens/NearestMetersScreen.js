@@ -57,7 +57,7 @@ const NearestMetersScreenInner = observer(function NearestMetersScreenInner({ na
           coordinates?.latitude || 7.0731,
           coordinates?.longitude || 125.6129
         ]}
-        initialZoom={15}
+        initialZoom={18}
         markers={store.nearestMeters.map((meter, idx) => {
           const offsetLat = idx === 0 ? 0 : (Math.cos((idx - 1) * Math.PI) * 0.0001);
           const offsetLng = idx === 0 ? 0 : (Math.sin((idx - 1) * Math.PI) * 0.0001);
@@ -96,22 +96,49 @@ const NearestMetersScreenInner = observer(function NearestMetersScreenInner({ na
           <>
             <Text style={styles.panelTitle}>Select a nearest meter</Text>
             <Text style={styles.panelSubtitle}>
-              Up to 3 closest meters to your GPS. Choose from the list below.
+              {store.hasCustomerData 
+                ? 'Up to 3 closest meters to your GPS. Choose from the list below.'
+                : 'Customer data available offline when downloaded.'}
             </Text>
             {store.loading ? (
               <View style={{ paddingVertical: 20, alignItems: 'center' }}>
                 <ActivityIndicator size="small" color="#1e5a8e" />
-                <Text style={{ marginTop: 8, color: '#475569' }}>Looking up meter details…</Text>
+                <Text style={{ marginTop: 8, color: '#475569' }}>Looking up meter details from offline data…</Text>
+              </View>
+            ) : store.errorMessage ? (
+              <View style={{ paddingVertical: 18, alignItems: 'center', paddingHorizontal: 16 }}>
+                <Ionicons name="cloud-download-outline" size={40} color="#f59e0b" style={{ marginBottom: 10 }} />
+                <Text style={{ color: '#b45309', marginBottom: 10, textAlign: 'center', fontSize: 14 }}>
+                  {store.errorMessage}
+                </Text>
+                <TouchableOpacity 
+                  onPress={() => navigation.navigate('Settings')} 
+                  style={{ paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#f59e0b', borderRadius: 8, marginBottom: 8 }}
+                >
+                  <Text style={{ color: '#fff', fontWeight: '700' }}>Go to Settings</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  onPress={() => store.fetchNearest(coordinates)} 
+                  style={{ paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#e5e7eb', borderRadius: 8 }}
+                >
+                  <Text style={{ color: '#374151', fontWeight: '600' }}>Retry</Text>
+                </TouchableOpacity>
               </View>
             ) : store.nearestMeters.length === 0 ? (
               <View style={{ paddingVertical: 18, alignItems: 'center' }}>
-                <Text style={{ color: '#475569', marginBottom: 10 }}>No nearby meters were found.</Text>
+                <Text style={{ color: '#475569', marginBottom: 10 }}>No nearby meters were found in the downloaded data.</Text>
                 <TouchableOpacity onPress={() => store.fetchNearest(coordinates)} style={{ paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#1e5a8e', borderRadius: 8 }}>
                   <Text style={{ color: '#fff', fontWeight: '700' }}>Retry</Text>
                 </TouchableOpacity>
               </View>
             ) : (
               <>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, paddingHorizontal: 4 }}>
+                  <Ionicons name="checkmark-circle" size={16} color="#10b981" />
+                  <Text style={{ marginLeft: 6, color: '#10b981', fontSize: 12, fontWeight: '600' }}>
+                    Using offline customer data
+                  </Text>
+                </View>
                 <ScrollView style={styles.panelList} contentContainerStyle={styles.panelListContent}>
                   {store.nearestMeters.map((meter, idx) => (
                     <TouchableOpacity
@@ -125,15 +152,12 @@ const NearestMetersScreenInner = observer(function NearestMetersScreenInner({ na
                           <Text style={styles.badgeNumber}>{idx + 1}</Text>
                         </View>
                         <View style={{ marginLeft: 12, flex: 1 }}>
-                          <Text style={styles.meterId}>{meter.meterId || meter.id}</Text>
-                          <Text style={styles.meterAddress}>{meter.address}</Text>
+                          <Text style={styles.meterId}>{meter.meterNumber || meter.accountNumber || meter.id}</Text>
+                          <Text style={styles.meterAddress} numberOfLines={2}>{meter.address}</Text>
                           <Text style={styles.meterDistance}>
-                            {meter.distance < 1 
-                              ? `${(meter.distance * 100).toFixed(0)} cm` 
-                              : meter.distance < 1000
-                              ? `${meter.distance.toFixed(1)} m`
-                              : `${(meter.distance / 1000).toFixed(2)} km`
-                            }
+                            📍 {meter.distance < 1000 
+                              ? `${Math.round(meter.distance)}m away` 
+                              : `${(meter.distance / 1000).toFixed(2)}km away`}
                           </Text>
                         </View>
                       </View>

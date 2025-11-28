@@ -1,15 +1,18 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { WebView } from 'react-native-webview';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Text } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
+import * as FileSystem from 'expo-file-system/legacy';
 
 /**
  * Leaflet Map Component using WebView
  * Works reliably in standalone APK builds with OpenStreetMap tiles
+ * Supports offline mode with cached tiles
  */
 const LeafletMap = ({ 
   latitude = 7.0731, 
   longitude = 125.6128, 
-  zoom = 14,
+  zoom = 17,
   initialCenter = null,
   initialZoom = null,
   markers = [],
@@ -20,6 +23,55 @@ const LeafletMap = ({
   onMapPress,
   style
 }) => {
+  const [isOnline, setIsOnline] = useState(true);
+  const [hasOfflineTiles, setHasOfflineTiles] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+  
+  // Check network status and offline tile availability
+  useEffect(() => {
+    let mounted = true;
+    
+    const checkStatus = async () => {
+      try {
+        // Check network status
+        const netState = await NetInfo.fetch();
+        const online = netState.isConnected && netState.isInternetReachable !== false;
+        
+        // Check if offline tiles exist
+        const tileCacheDir = `${FileSystem.cacheDirectory}map_tiles/osm`;
+        const dirInfo = await FileSystem.getInfoAsync(tileCacheDir);
+        
+        if (mounted) {
+          setIsOnline(online);
+          setHasOfflineTiles(dirInfo.exists);
+          setIsReady(true);
+          console.log(`[LeafletMap] Network: ${online ? 'Online' : 'Offline'}, Offline tiles: ${dirInfo.exists ? 'Available' : 'Not available'}`);
+        }
+      } catch (error) {
+        console.warn('[LeafletMap] Error checking status:', error);
+        if (mounted) {
+          setIsOnline(true); // Assume online on error
+          setIsReady(true);
+        }
+      }
+    };
+    
+    checkStatus();
+    
+    // Listen for network changes
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      const online = state.isConnected && state.isInternetReachable !== false;
+      if (mounted) {
+        setIsOnline(online);
+        console.log(`[LeafletMap] Network changed: ${online ? 'Online' : 'Offline'}`);
+      }
+    });
+    
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, []);
   
   // Use initialCenter if provided, otherwise use latitude/longitude
   const centerLat = initialCenter ? initialCenter[0] : latitude;
@@ -29,6 +81,20 @@ const LeafletMap = ({
   // Use passed userLocation or try to get from props
   const userLat = userLocation ? userLocation.latitude : latitude;
   const userLng = userLocation ? userLocation.longitude : longitude;
+  
+  // Determine tile URL based on online/offline status
+  // When offline, the WebView cache will serve previously loaded tiles
+  const tileUrl = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+  
+  // Show loading state while checking status
+  if (!isReady) {
+    return (
+      <View style={[{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#e5e7eb' }, style]}>
+        <ActivityIndicator size="large" color="#2563eb" />
+        <Text style={{ marginTop: 10, color: '#6b7280' }}>Loading map...</Text>
+      </View>
+    );
+  }
   
   const htmlContent = `
     <!DOCTYPE html>
@@ -57,10 +123,31 @@ const LeafletMap = ({
           border: 3px solid white;
           box-shadow: 0 2px 8px rgba(0,0,0,0.3);
         }
+        .offline-indicator {
+          position: fixed;
+          top: 10px;
+          right: 10px;
+          background: ${isOnline ? '#10b981' : '#f59e0b'};
+          color: white;
+          padding: 6px 12px;
+          border-radius: 16px;
+          font-size: 12px;
+          font-weight: bold;
+          z-index: 9999;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .offline-indicator::before {
+          content: '${isOnline ? '●' : '◐'}';
+          font-size: 10px;
+        }
       </style>
     </head>
     <body>
       <div id="map"></div>
+      <div class="offline-indicator">${isOnline ? 'Online' : 'Offline Mode'}</div>
       <script>
         // Initialize map with performance optimizations
         var map = L.map('map', {
@@ -75,10 +162,11 @@ const LeafletMap = ({
           bounceAtZoomLimits: false
         }).setView([${centerLat}, ${centerLng}], ${mapZoom});
 
-        // Add OpenStreetMap tiles
-        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        // Add OpenStreetMap tiles (WebView cache will handle offline access)
+        L.tileLayer('${tileUrl}', {
           maxZoom: 19,
-          attribution: '© OpenStreetMap contributors'
+          attribution: '© OpenStreetMap contributors',
+          crossOrigin: true
         }).addTo(map);
 
         // Add custom icon function
@@ -136,7 +224,13 @@ const LeafletMap = ({
           iconAnchor: [16, 16]
         });
         
-        L.marker([userLocationMarker.latitude, userLocationMarker.longitude], { icon: userIcon })
+        // User location marker is NOT interactive (no click/drag)
+        L.marker([userLocationMarker.latitude, userLocationMarker.longitude], { 
+          icon: userIcon,
+          interactive: false,  // Prevent clicks
+          keyboard: false,
+          zIndexOffset: -1000  // Keep below other markers
+        })
           .addTo(map)
           .bindPopup('<b>📍 Your Current Location</b>');
         
@@ -208,6 +302,11 @@ const LeafletMap = ({
         androidLayerType="hardware"
         cacheEnabled={true}
         cacheMode="LOAD_CACHE_ELSE_NETWORK"
+        nestedScrollEnabled={true}
+        scrollEnabled={true}
+        overScrollMode="never"
+        showsVerticalScrollIndicator={false}
+        showsHorizontalScrollIndicator={false}
         renderLoading={() => (
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
             <ActivityIndicator size="large" color="#2563eb" />

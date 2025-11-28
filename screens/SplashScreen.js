@@ -1,46 +1,86 @@
-import React, { useEffect, useRef } from 'react';
-import { View, Text, Image, StyleSheet, Dimensions, TouchableOpacity, Animated } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, Image, StyleSheet, Dimensions, Animated, ActivityIndicator } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import Constants from 'expo-constants';
 import { observer } from 'mobx-react-lite';
 import { useAuthStore } from '../stores/RootStore';
 import { startLocationTracking } from '../services/locationTracker';
+import { verifyLocationAccess, showLocationErrorAlert, getAllowedAreaName } from '../services/locationGuard';
 
 const { width, height } = Dimensions.get('window');
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
 const SplashScreen = observer(({ navigation }) => {
   const authStore = useAuthStore();
+  const [locationStatus, setLocationStatus] = useState('checking'); // 'checking', 'allowed', 'denied'
+  const [statusMessage, setStatusMessage] = useState('Verifying location...');
   const wave1Anim = useRef(new Animated.Value(0)).current;
   const wave2Anim = useRef(new Animated.Value(0)).current;
   const wave3Anim = useRef(new Animated.Value(0)).current;
 
-  useEffect(() => {
-    // Check for auto-login
-    const checkAuth = async () => {
-      try {
-        const isAuthenticated = await authStore.checkAutoLogin();
-        if (isAuthenticated) {
-          console.log('[SplashScreen] User authenticated, navigating to MainTabs');
-          // Start location tracking for authenticated users
-          try {
-            startLocationTracking();
-          } catch (trackingError) {
-            console.warn('Location tracking failed to start:', trackingError);
-          }
-          // Small delay for smooth transition
-          setTimeout(() => {
-            navigation.replace('MainTabs');
-          }, 1000);
-        } else {
-          console.log('[SplashScreen] No valid session found');
+  const checkLocationAndAuth = async () => {
+    setLocationStatus('checking');
+    setStatusMessage('Verifying location...');
+    
+    // First, verify location access
+    console.log('[SplashScreen] Checking location access...');
+    const locationResult = await verifyLocationAccess();
+    
+    if (!locationResult.allowed) {
+      console.log('[SplashScreen] Location access denied:', locationResult.errorType);
+      setLocationStatus('denied');
+      setStatusMessage(locationResult.message);
+      
+      // Show alert with retry option
+      showLocationErrorAlert(
+        locationResult.errorType,
+        locationResult.message,
+        () => checkLocationAndAuth() // Retry callback
+      );
+      return;
+    }
+    
+    console.log('[SplashScreen] Location verified, checking authentication...');
+    setLocationStatus('allowed');
+    setStatusMessage('Location verified. Checking login...');
+    
+    // Location is allowed, now check authentication
+    try {
+      const isAuthenticated = await authStore.checkAutoLogin();
+      if (isAuthenticated) {
+        console.log('[SplashScreen] User authenticated, navigating to MainTabs');
+        setStatusMessage('Welcome back!');
+        // Start location tracking for authenticated users
+        try {
+          startLocationTracking();
+        } catch (trackingError) {
+          console.warn('Location tracking failed to start:', trackingError);
         }
-      } catch (error) {
-        console.error('[SplashScreen] Auth check error:', error);
+        // Navigate after brief delay
+        setTimeout(() => {
+          navigation.replace('MainTabs');
+        }, 1500);
+      } else {
+        console.log('[SplashScreen] No valid session found, navigating to Login');
+        setStatusMessage('Please log in');
+        // Navigate to Login
+        setTimeout(() => {
+          navigation.replace('Login');
+        }, 1500);
       }
-    };
+    } catch (error) {
+      console.error('[SplashScreen] Auth check error:', error);
+      setStatusMessage('Please log in');
+      // Navigate to Login on error
+      setTimeout(() => {
+        navigation.replace('Login');
+      }, 2000);
+    }
+  };
 
-    checkAuth();
+  useEffect(() => {
+    // Start location and auth check
+    checkLocationAndAuth();
 
     // Create wave animations with different speeds
     const createWaveAnimation = (animValue, duration) => {
@@ -66,10 +106,6 @@ const SplashScreen = observer(({ navigation }) => {
     createWaveAnimation(wave3Anim, 5000).start();
   }, []);
 
-  const handlePress = () => {
-    navigation.replace('Login');
-  };
-
   // Interpolate animation values for wave movement
   const wave1Offset = wave1Anim.interpolate({
     inputRange: [0, 1],
@@ -87,11 +123,7 @@ const SplashScreen = observer(({ navigation }) => {
   });
 
   return (
-    <TouchableOpacity 
-      style={styles.container}
-      onPress={handlePress}
-      activeOpacity={0.9}
-    >
+    <View style={styles.container}>
       {/* Top Section with Logo and Title */}
       <View style={styles.content}>
         <Image
@@ -100,6 +132,25 @@ const SplashScreen = observer(({ navigation }) => {
           resizeMode="contain"
         />
         <Text style={styles.title}>DCWD LEAK DETECTION APP</Text>
+        
+        {/* Status indicator */}
+        <View style={styles.statusContainer}>
+          {locationStatus === 'checking' && (
+            <ActivityIndicator size="small" color="#1e5a8e" style={{ marginBottom: 8 }} />
+          )}
+          {locationStatus === 'allowed' && (
+            <Text style={styles.statusIcon}>✓</Text>
+          )}
+          {locationStatus === 'denied' && (
+            <Text style={[styles.statusIcon, { color: '#ef4444' }]}>✗</Text>
+          )}
+          <Text style={[
+            styles.statusText,
+            locationStatus === 'denied' && { color: '#ef4444' }
+          ]}>
+            {statusMessage}
+          </Text>
+        </View>
       </View>
 
       {/* Wave Design at Bottom */}
@@ -146,7 +197,7 @@ const SplashScreen = observer(({ navigation }) => {
           {(Constants.expoConfig?.android?.versionCode || Constants.expoConfig?.ios?.buildNumber) ? ` (b.${Constants.expoConfig?.android?.versionCode || Constants.expoConfig?.ios?.buildNumber})` : ''}
         </Text>
       </View>
-    </TouchableOpacity>
+    </View>
   );
 });
 
@@ -177,6 +228,21 @@ const styles = StyleSheet.create({
     color: '#1e3a5f',
     textAlign: 'center',
     letterSpacing: 1,
+  },
+  statusContainer: {
+    marginTop: 30,
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  statusIcon: {
+    fontSize: 24,
+    color: '#10b981',
+    marginBottom: 8,
+  },
+  statusText: {
+    fontSize: 14,
+    color: '#64748b',
+    textAlign: 'center',
   },
   waveContainer: {
     position: 'absolute',

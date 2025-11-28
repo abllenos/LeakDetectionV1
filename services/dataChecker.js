@@ -28,6 +28,12 @@ export const checkAndNotifyNewData = async () => {
     // Check for new data
     const result = await checkForNewData();
     
+    // If skipped due to no authentication, don't update last check time
+    if (result.skipped) {
+      console.log('⏭️ Data check skipped - user not authenticated');
+      return null;
+    }
+    
     // Update last check time
     await AsyncStorage.setItem(LAST_CHECK_KEY, now.toString());
     

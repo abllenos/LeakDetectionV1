@@ -6,14 +6,60 @@ class DashboardStore {
   leakReportsData = null;
   loadingReports = true;
   userData = { name: 'User', avatar: 'U' };
+  
+  // UI state
+  initialLoadComplete = false;
+  selectedActivity = null;
+  detailsModalVisible = false;
+  allReportsModalVisible = false;
+  
+  // Customer download state
+  showDownloadPrompt = false;
+  downloadProgress = 0;
+  downloadedRecords = 0;
+  isDownloading = false;
+  downloadComplete = false;
+  newCustomersAvailable = 0;
+  resumeDownload = false; // Flag to indicate if we should resume an incomplete download
+  
+  // Offline data status
+  customerDataCount = 0;
+  customerDataStatus = 'unknown'; // 'unknown', 'none', 'partial', 'complete'
 
   constructor() {
     makeObservable(this, {
       leakReportsData: observable,
       loadingReports: observable,
       userData: observable,
+      initialLoadComplete: observable,
+      selectedActivity: observable,
+      detailsModalVisible: observable,
+      allReportsModalVisible: observable,
+      showDownloadPrompt: observable,
+      downloadProgress: observable,
+      downloadedRecords: observable,
+      isDownloading: observable,
+      downloadComplete: observable,
+      newCustomersAvailable: observable,
+      resumeDownload: observable,
+      customerDataCount: observable,
+      customerDataStatus: observable,
+      setInitialLoadComplete: action.bound,
+      setSelectedActivity: action.bound,
+      setDetailsModalVisible: action.bound,
+      setAllReportsModalVisible: action.bound,
+      setShowDownloadPrompt: action.bound,
+      setDownloadProgress: action.bound,
+      setDownloadedRecords: action.bound,
+      setIsDownloading: action.bound,
+      setDownloadComplete: action.bound,
+      setNewCustomersAvailable: action.bound,
+      setResumeDownload: action.bound,
+      setCustomerDataCount: action.bound,
+      setCustomerDataStatus: action.bound,
       loadUserData: action.bound,
       loadLeakReports: action.bound,
+      checkCustomerDataStatus: action.bound,
       totalReports: computed,
       reportedCount: computed,
       dispatchedCount: computed,
@@ -25,7 +71,54 @@ class DashboardStore {
       userName: computed,
       userAvatar: computed,
       recentReports: computed,
+      allReports: computed,
     });
+  }
+  
+  setCustomerDataCount(count) {
+    this.customerDataCount = count;
+  }
+  
+  setCustomerDataStatus(status) {
+    this.customerDataStatus = status;
+  }
+  
+  async checkCustomerDataStatus() {
+    try {
+      const chunkCount = await AsyncStorage.getItem('allCustomers_chunks');
+      const totalCount = await AsyncStorage.getItem('allCustomers_count');
+      const manifest = await AsyncStorage.getItem('allCustomers_manifest');
+      
+      if (!chunkCount || parseInt(chunkCount) === 0) {
+        runInAction(() => {
+          this.customerDataCount = 0;
+          this.customerDataStatus = 'none';
+        });
+        return;
+      }
+      
+      const count = parseInt(totalCount) || 0;
+      let status = 'partial';
+      
+      if (manifest) {
+        const manifestData = JSON.parse(manifest);
+        if (manifestData.status === 'complete') {
+          status = 'complete';
+        }
+      }
+      
+      runInAction(() => {
+        this.customerDataCount = count;
+        this.customerDataStatus = status;
+      });
+      
+      console.log(`[DashboardStore] Customer data status: ${status}, count: ${count}`);
+    } catch (error) {
+      console.error('[DashboardStore] Error checking customer data status:', error);
+      runInAction(() => {
+        this.customerDataStatus = 'unknown';
+      });
+    }
   }
 
   async loadUserData() {
@@ -176,9 +269,67 @@ class DashboardStore {
     return (this.leakReportsData?.reports || []).slice(0, 5);
   }
 
+  get allReports() {
+    return this.leakReportsData?.reports || [];
+  }
+
+  // Setters
+  setInitialLoadComplete(value) {
+    this.initialLoadComplete = value;
+  }
+
+  setSelectedActivity(value) {
+    this.selectedActivity = value;
+  }
+
+  setDetailsModalVisible(value) {
+    this.detailsModalVisible = value;
+  }
+
+  setAllReportsModalVisible(value) {
+    this.allReportsModalVisible = value;
+  }
+
+  setShowDownloadPrompt(value) {
+    this.showDownloadPrompt = value;
+  }
+
+  setDownloadProgress(value) {
+    this.downloadProgress = value;
+  }
+
+  setIsDownloading(value) {
+    this.isDownloading = value;
+  }
+
+  setDownloadComplete(value) {
+    this.downloadComplete = value;
+  }
+
+  setDownloadedRecords(value) {
+    this.downloadedRecords = value;
+  }
+
+  setNewCustomersAvailable(value) {
+    this.newCustomersAvailable = value;
+  }
+
+  setResumeDownload(value) {
+    this.resumeDownload = value;
+  }
+
   reset() {
     this.leakReportsData = null;
     this.loadingReports = true;
+    this.initialLoadComplete = false;
+    this.selectedActivity = null;
+    this.detailsModalVisible = false;
+    this.allReportsModalVisible = false;
+    this.showDownloadPrompt = false;
+    this.downloadProgress = 0;
+    this.isDownloading = false;
+    this.downloadComplete = false;
+    this.newCustomersAvailable = 0;
   }
 }
 

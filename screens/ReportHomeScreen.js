@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, StatusBar, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -11,6 +11,7 @@ import LeafletMap from '../components/LeafletMap';
 // Component wrapped with observer - navigation/route props extracted to prevent MobX observation
 const ReportHomeScreenInner = observer(({ navigation, params }) => {
   const store = useReportMapStore();
+  const [scrollEnabled, setScrollEnabled] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -72,7 +73,12 @@ const ReportHomeScreenInner = observer(({ navigation, params }) => {
         </View>
       </LinearGradient>
 
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+      <ScrollView 
+        style={styles.scrollView} 
+        contentContainerStyle={styles.scrollContent}
+        scrollEnabled={scrollEnabled}
+        nestedScrollEnabled={true}
+      >
         {/* Search bar */}
         <View style={styles.searchRow}>
           <View style={styles.searchInputWrap}>
@@ -101,21 +107,26 @@ const ReportHomeScreenInner = observer(({ navigation, params }) => {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.mapWrap}>
+        <View 
+          style={styles.mapWrap}
+          onTouchStart={() => setScrollEnabled(false)}
+          onTouchEnd={() => setScrollEnabled(true)}
+          onTouchCancel={() => setScrollEnabled(true)}
+        >
           <LeafletMap
             latitude={store.region.latitude}
             longitude={store.region.longitude}
-            zoom={14}
+            zoom={17}
             markers={[]}
-            userLocation={{ latitude: store.region.latitude, longitude: store.region.longitude }}
+            userLocation={{ latitude: store.userGpsLocation?.latitude || store.region.latitude, longitude: store.userGpsLocation?.longitude || store.region.longitude }}
             showUserLocation={true}
             style={styles.map}
           />
         </View>
 
         <View style={styles.optionsSection}>
-          <Text style={styles.sectionTitle}>Report Options</Text>
-          <Text style={styles.sectionSubtitle}>Choose the best way to report the leak location</Text>
+          <Text style={styles.sectionTitle}>Start Leak Detection </Text>
+          <Text style={styles.sectionSubtitle}>Leak Detected?, Report then Repair</Text>
 
           {/* Report Nearest Meter */}
           <TouchableOpacity
@@ -127,45 +138,9 @@ const ReportHomeScreenInner = observer(({ navigation, params }) => {
               <Ionicons name="navigate" size={28} color="#1e5a8e" />
             </View>
             <View style={styles.optionContent}>
-              <Text style={styles.optionTitle}>Report Nearest Meter</Text>
+              <Text style={styles.optionTitle}>Report Leak Detected</Text>
               <Text style={styles.optionDescription}>
                 Find the 3 closest meters to your location and select one
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={24} color="#cbd5e1" />
-          </TouchableOpacity>
-
-          {/* Use Current Location */}
-          <TouchableOpacity
-            style={styles.optionCard}
-            onPress={() => navigation.navigate('ReportMap', { useCurrentLocation: true })}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.optionIconWrap, { backgroundColor: '#f0fdf4' }]}>
-              <Ionicons name="location" size={28} color="#10b981" />
-            </View>
-            <View style={styles.optionContent}>
-              <Text style={styles.optionTitle}>Use Current Location</Text>
-              <Text style={styles.optionDescription}>
-                Report the leak at your current GPS position
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={24} color="#cbd5e1" />
-          </TouchableOpacity>
-
-          {/* Drag Pin on Map */}
-          <TouchableOpacity
-            style={styles.optionCard}
-            onPress={() => navigation.navigate('ReportMap', { useDragPin: true })}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.optionIconWrap, { backgroundColor: '#eff6ff' }]}>
-              <Ionicons name="pin" size={28} color="#3b82f6" />
-            </View>
-            <View style={styles.optionContent}>
-              <Text style={styles.optionTitle}>Drag Pin on Map</Text>
-              <Text style={styles.optionDescription}>
-                Manually place a pin on the map by dragging
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={24} color="#cbd5e1" />

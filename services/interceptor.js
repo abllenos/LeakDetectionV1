@@ -102,13 +102,83 @@ export const fetchDmaCodes = async (forceRefresh = false) => {
   }
 };
 
-export const searchAccountOrMeter = async (searchValue) => {
+// Search offline customer data
+export const searchOfflineCustomers = async (searchValue) => {
   try {
+    if (!searchValue || searchValue.trim() === '') {
+      return [];
+    }
+    
+    const search = searchValue.trim().toLowerCase();
+    console.log(`🔍 Searching offline customer data for: "${search}"`);
+    
+    const customers = await getAvailableCustomers();
+    
+    if (customers.length === 0) {
+      console.log('⚠️ No offline customer data available for search');
+      return [];
+    }
+    
+    console.log(`📦 Searching through ${customers.length} offline records...`);
+    
+    // Search by meter number or account number (partial match)
+    const results = customers.filter(customer => {
+      const meterNumber = (customer.meterNumber || customer.meter_number || customer.MeterNumber || '').toString().toLowerCase();
+      const accountNumber = (customer.accountNumber || customer.account_number || customer.AccountNumber || '').toString().toLowerCase();
+      const address = (customer.address || customer.Address || '').toString().toLowerCase();
+      
+      return meterNumber.includes(search) || 
+             accountNumber.includes(search) ||
+             address.includes(search);
+    });
+    
+    // Limit results to prevent performance issues
+    const limitedResults = results.slice(0, 20);
+    
+    console.log(`✅ Found ${results.length} matches, returning ${limitedResults.length}`);
+    return limitedResults;
+  } catch (error) {
+    console.error('❌ Offline search error:', error);
+    return [];
+  }
+};
+
+export const searchAccountOrMeter = async (searchValue, forceOffline = false) => {
+  try {
+    // Check if we should use offline search
+    const netInfo = await import('@react-native-community/netinfo');
+    const state = await netInfo.default.fetch();
+    const isOnline = state.isConnected && state.isInternetReachable !== false;
+    
+    if (!isOnline || forceOffline) {
+      console.log('📴 Device offline - using offline customer search');
+      const offlineResults = await searchOfflineCustomers(searchValue);
+      
+      if (offlineResults.length > 0) {
+        return { data: offlineResults, offline: true };
+      }
+      
+      // Return empty with offline flag
+      return { data: [], offline: true, message: 'No matching customer found in offline data' };
+    }
+    
+    // Online search
     const res = await devApi.get('/admin/customer/SearchAccountOrMeterNumber', {
       params: { searchValue },
     });
     return res?.data;
   } catch (err) {
+    // If online search fails, try offline as fallback
+    console.log('⚠️ Online search failed, trying offline fallback...');
+    try {
+      const offlineResults = await searchOfflineCustomers(searchValue);
+      if (offlineResults.length > 0) {
+        return { data: offlineResults, offline: true, fallback: true };
+      }
+    } catch (offlineErr) {
+      console.error('Offline fallback also failed:', offlineErr);
+    }
+    
     const status = err?.response?.status || err?.response?.data?.statusCode;
     const message = err?.response?.data?.message;
     if (status === 404 && message && message.toLowerCase().includes('no matching customer')) {
@@ -128,6 +198,8 @@ export const getAvailableCustomers = async () => {
       const chunks = parseInt(chunkCount);
       console.log(`📦 Loading ${chunks} chunks...`);
       let allCustomers = [];
+      let missingChunks = [];
+      
       for (let i = 0; i < chunks; i++) {
         const chunk = await AsyncStorage.getItem(`allCustomers_chunk_${i}`);
         if (chunk) {
@@ -136,10 +208,19 @@ export const getAvailableCustomers = async () => {
           allCustomers = allCustomers.concat(parsedChunk);
         } else {
           console.log(`⚠️ Chunk ${i} is missing`);
+          missingChunks.push(i);
         }
       }
+      
+      // Report data integrity status
+      if (missingChunks.length > 0) {
+        console.warn(`⚠️ DATA INCOMPLETE: ${missingChunks.length} chunks missing out of ${chunks}`);
+        console.warn(`⚠️ Missing chunks: ${missingChunks.slice(0, 10).join(', ')}${missingChunks.length > 10 ? '...' : ''}`);
+        console.warn('⚠️ Please re-download customer data from Settings');
+      }
+      
       if (allCustomers.length > 0) {
-        console.log(`📦 Loaded ${allCustomers.length} customers from ${chunks} chunks`);
+        console.log(`📦 Loaded ${allCustomers.length} customers from ${chunks} chunks (${missingChunks.length} missing)`);
         return allCustomers;
       } else {
         console.log('⚠️ Chunks exist but no data loaded');
@@ -185,6 +266,76 @@ export const getAvailableCustomers = async () => {
   }
 };
 
+// Check if customer data download is complete
+export const checkCustomerDataIntegrity = async () => {
+  try {
+    // First check manifest
+    const manifest = await AsyncStorage.getItem('allCustomers_manifest');
+    if (manifest) {
+      const manifestData = JSON.parse(manifest);
+      console.log('📋 Manifest status:', manifestData.status);
+      
+      // If manifest says complete, verify by checking chunks
+      if (manifestData.status === 'complete') {
+        const chunkCount = await AsyncStorage.getItem('allCustomers_chunks');
+        const totalCount = await AsyncStorage.getItem('allCustomers_count');
+        if (chunkCount && totalCount) {
+          return {
+            complete: true,
+            totalChunks: parseInt(chunkCount),
+            totalRecords: parseInt(totalCount),
+          };
+        }
+      }
+    }
+    
+    const chunkCount = await AsyncStorage.getItem('allCustomers_chunks');
+    if (!chunkCount || parseInt(chunkCount) === 0) {
+      return { complete: false, reason: 'No data downloaded', totalChunks: 0, loadedRecords: 0 };
+    }
+    
+    const chunks = parseInt(chunkCount);
+    let missingChunks = [];
+    let totalRecords = 0;
+    
+    // Check each chunk exists and count records
+    for (let i = 0; i < chunks; i++) {
+      const chunk = await AsyncStorage.getItem(`allCustomers_chunk_${i}`);
+      if (chunk) {
+        try {
+          const parsedChunk = JSON.parse(chunk);
+          totalRecords += parsedChunk.length;
+        } catch (e) {
+          console.warn(`⚠️ Chunk ${i} is corrupted`);
+          missingChunks.push(i);
+        }
+      } else {
+        missingChunks.push(i);
+      }
+    }
+    
+    if (missingChunks.length > 0) {
+      return {
+        complete: false,
+        reason: `${missingChunks.length} chunks missing or corrupted`,
+        missingChunks,
+        totalChunks: chunks,
+        loadedRecords: totalRecords,
+      };
+    }
+    
+    // All chunks present - mark as complete
+    return {
+      complete: true,
+      totalChunks: chunks,
+      totalRecords,
+    };
+  } catch (error) {
+    console.error('Error checking data integrity:', error);
+    return { complete: false, reason: error.message, totalChunks: 0, loadedRecords: 0 };
+  }
+};
+
 export const hasRemoteDataChanged = async () => {
   try {
     const cachedCount = await AsyncStorage.getItem('allCustomers_count');
@@ -213,6 +364,20 @@ export const hasRemoteDataChanged = async () => {
 
 export const checkForNewData = async () => {
   try {
+    // Check if user is authenticated first
+    const token = await AsyncStorage.getItem('token');
+    if (!token) {
+      console.log('⏭️ Skipping data check - not authenticated');
+      return {
+        hasNewData: false,
+        localCount: 0,
+        remoteCount: 0,
+        difference: 0,
+        needsDownload: false,
+        skipped: true
+      };
+    }
+    
     const cachedCount = await AsyncStorage.getItem('allCustomers_count');
     const localCount = parseInt(cachedCount) || 0;
     const res = await devApi.get('/admin/customer/paginate', {
@@ -244,7 +409,7 @@ export const checkForNewData = async () => {
 
 export const fetchAllCustomers = async (forceRefresh = false, onProgress = null, opts = {}) => {
   const BATCH_SIZE = 5000; // Download 5000 records per batch
-  const CHUNK_SIZE = 1000; // Save to AsyncStorage every 1,000 records (reduced from 10k to avoid SQLite limits)
+  const CHUNK_SIZE = 5000; // Save to AsyncStorage every 5,000 records
   const API_URL = 'https://api.davao-water.gov.ph/dcwd-gis/api/v1/admin/customer/all';
   
   try {
@@ -258,19 +423,23 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
     
     // Check if we already have cached data and not forcing refresh
     if (!forceRefresh) {
-      const cachedCount = await AsyncStorage.getItem('allCustomers_count');
-      if (cachedCount) {
-        console.log('✅ Using cached customer data:', cachedCount, 'records');
-        return true;
+      const manifest = await AsyncStorage.getItem('allCustomers_manifest');
+      if (manifest) {
+        const manifestData = JSON.parse(manifest);
+        if (manifestData.status === 'complete') {
+          console.log('✅ Using cached customer data:', manifestData.totalRecords, 'records');
+          return true;
+        }
       }
     }
     
     // Initialize download
-    let currentChunkData = []; // Only hold current chunk in memory
+    let currentChunkData = [];
     let currentChunkIndex = 0;
     let totalRecords = 0;
     let currentPage = 1;
     let hasMore = true;
+    let estimatedTotal = 0;
     
     // Mark download as in progress
     await safeSetItem('allCustomers_manifest', JSON.stringify({
@@ -281,30 +450,29 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
     
     while (hasMore) {
       try {
-        console.log(`📦 Fetching batch ${currentPage} (offset: ${(currentPage - 1) * BATCH_SIZE})...`);
+        const offset = (currentPage - 1) * BATCH_SIZE;
+        console.log(`📦 Fetching batch ${currentPage} (offset: ${offset})...`);
         
         // Fetch batch from API with pagination
         const response = await devApi.get(API_URL, {
           params: {
             limit: BATCH_SIZE,
-            offset: (currentPage - 1) * BATCH_SIZE,
+            offset: offset,
             page: currentPage,
           },
-          timeout: 60000, // 60 second timeout per batch
+          timeout: 120000, // 2 minute timeout per batch
         });
         
         const batchData = response?.data?.data || response?.data || [];
         const records = Array.isArray(batchData) ? batchData : (batchData.records || batchData.customers || []);
         
+        // Try to get total count from response
+        if (currentPage === 1) {
+          estimatedTotal = response?.data?.total || response?.data?.count || response?.data?.totalRecords || 280000;
+          console.log(`📊 Estimated total records: ${estimatedTotal}`);
+        }
+        
         console.log(`✅ Batch ${currentPage} received: ${records.length} records`);
-        console.log(`📊 Response structure:`, {
-          hasData: !!response?.data?.data,
-          hasRecords: !!batchData?.records,
-          hasCustomers: !!batchData?.customers,
-          isArray: Array.isArray(batchData),
-          totalInResponse: response?.data?.total || response?.data?.count || 'unknown',
-          sampleRecord: records[0] ? Object.keys(records[0]).join(', ') : 'none'
-        });
         
         if (records.length === 0) {
           hasMore = false;
@@ -312,108 +480,146 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
           break;
         }
         
-        // Check if API might be ignoring pagination (returning all data every time)
-        if (currentPage === 1 && records.length > 100000) {
-          console.warn('⚠️ API returned very large dataset on first request. It may not support pagination.');
-          console.log(`📊 Total records in first response: ${records.length}`);
-          // Save all data as chunks and exit
+        // Handle API returning all data at once (no pagination support)
+        if (currentPage === 1 && records.length > 50000) {
+          console.log(`📊 API returned ${records.length} records in single response - saving in chunks...`);
           let chunkIndex = 0;
           for (let i = 0; i < records.length; i += CHUNK_SIZE) {
             const chunk = records.slice(i, i + CHUNK_SIZE);
-            console.log(`💾 Saving chunk ${chunkIndex} (${chunk.length} records)...`);
-            await safeSetItem(
-              `allCustomers_chunk_${chunkIndex}`,
-              JSON.stringify(chunk)
-            );
+            await safeSetItem(`allCustomers_chunk_${chunkIndex}`, JSON.stringify(chunk));
             chunkIndex++;
+            
+            // Update progress
+            if (onProgress) {
+              onProgress({
+                current: i + chunk.length,
+                total: records.length,
+                percentage: Math.round(((i + chunk.length) / records.length) * 100),
+              });
+            }
           }
-          totalRecords = records.length;
+          
           await safeSetItem('allCustomers_chunks', chunkIndex.toString());
-          await safeSetItem('allCustomers_count', totalRecords.toString());
+          await safeSetItem('allCustomers_count', records.length.toString());
           await safeSetItem('allCustomers_timestamp', new Date().toISOString());
           await safeSetItem('allCustomers_manifest', JSON.stringify({
             status: 'complete',
             completedAt: new Date().toISOString(),
-            totalRecords,
-            note: 'API returned all data in single response'
+            totalRecords: records.length,
+            totalChunks: chunkIndex,
           }));
-          console.log('💾 Customer data cached successfully');
+          console.log(`✅ All ${records.length} customer records saved in ${chunkIndex} chunks`);
           return true;
         }
         
-        // Add to current chunk
-        currentChunkData = currentChunkData.concat(records);
-        totalRecords += records.length;
-        
-        // Save chunk when it reaches 10,000 records or if this is the last batch
-        if (currentChunkData.length >= CHUNK_SIZE || records.length < BATCH_SIZE) {
-          console.log(`💾 Saving chunk ${currentChunkIndex} (${currentChunkData.length} records)...`);
-          await safeSetItem(
-            `allCustomers_chunk_${currentChunkIndex}`,
-            JSON.stringify(currentChunkData)
-          );
-          currentChunkIndex++;
-          currentChunkData = []; // Clear memory
+        // Add records to current chunk buffer
+        for (const record of records) {
+          currentChunkData.push(record);
+          totalRecords++;
+          
+          // Save chunk when buffer is full
+          if (currentChunkData.length >= CHUNK_SIZE) {
+            console.log(`💾 Saving chunk ${currentChunkIndex} (${currentChunkData.length} records)...`);
+            await safeSetItem(`allCustomers_chunk_${currentChunkIndex}`, JSON.stringify(currentChunkData));
+            
+            // Update chunk count immediately after saving
+            await safeSetItem('allCustomers_chunks', (currentChunkIndex + 1).toString());
+            await safeSetItem('allCustomers_count', totalRecords.toString());
+            
+            currentChunkIndex++;
+            currentChunkData = [];
+          }
         }
         
-        // Update download count for UI
-        await safeSetItem('allCustomers_download_count', totalRecords.toString());
-        
-        // Report progress
+        // Report progress - use batch-based progress since we don't know actual total
         if (onProgress) {
+          // If we got less than BATCH_SIZE, we're on the last batch
+          const isLastBatch = records.length < BATCH_SIZE;
+          let percentage;
+          
+          if (isLastBatch) {
+            percentage = 100; // We're done!
+          } else if (estimatedTotal > 0 && estimatedTotal > totalRecords) {
+            // Use estimated total if available and reasonable
+            percentage = Math.min(95, Math.round((totalRecords / estimatedTotal) * 100));
+          } else {
+            // Fallback: increment by smaller amounts per batch
+            percentage = Math.min(95, currentPage * 2);
+          }
+          
           onProgress({
             current: totalRecords,
+            total: estimatedTotal || totalRecords,
             batch: currentPage,
-            batchSize: records.length,
-            percentage: Math.min(100, Math.round((currentPage * BATCH_SIZE) / (totalRecords + BATCH_SIZE) * 100)),
+            percentage,
           });
         }
         
         // Check if we received less than batch size (indicates last page)
         if (records.length < BATCH_SIZE) {
           hasMore = false;
-          console.log('📊 Last batch received (partial)');
+          console.log('📊 Last batch received');
         } else {
           currentPage++;
-          // Small delay between batches to avoid overwhelming the server
-          await new Promise(resolve => setTimeout(resolve, 500));
+          // Small delay between batches
+          await new Promise(resolve => setTimeout(resolve, 300));
         }
         
       } catch (batchError) {
         console.error(`❌ Error fetching batch ${currentPage}:`, batchError.message);
         
-        // If it's a network error and we have some data, save current chunk and stop gracefully
+        // Save any remaining data in buffer
+        if (currentChunkData.length > 0) {
+          console.log(`💾 Saving partial chunk ${currentChunkIndex} (${currentChunkData.length} records) before stopping...`);
+          await safeSetItem(`allCustomers_chunk_${currentChunkIndex}`, JSON.stringify(currentChunkData));
+          await safeSetItem('allCustomers_chunks', (currentChunkIndex + 1).toString());
+          await safeSetItem('allCustomers_count', totalRecords.toString());
+          currentChunkIndex++;
+        }
+        
+        // Update manifest as partial
+        await safeSetItem('allCustomers_manifest', JSON.stringify({
+          status: 'partial',
+          partialAt: new Date().toISOString(),
+          totalRecords,
+          totalChunks: currentChunkIndex,
+          lastBatch: currentPage,
+          error: batchError.message,
+        }));
+        
         if (totalRecords > 0) {
-          console.warn('⚠️ Stopping download due to error, saving partial data...');
-          if (currentChunkData.length > 0) {
-            await safeSetItem(
-              `allCustomers_chunk_${currentChunkIndex}`,
-              JSON.stringify(currentChunkData)
-            );
-            currentChunkIndex++;
-          }
-          hasMore = false;
+          console.warn(`⚠️ Download stopped with ${totalRecords} records saved. Can be resumed.`);
+          throw new Error(`Download interrupted at ${totalRecords} records. You can continue downloading later.`);
         } else {
-          throw batchError; // Rethrow if we have no data at all
+          throw batchError;
         }
       }
     }
     
-    console.log(`✅ Download complete: ${totalRecords} total customers downloaded`);
+    // Save any remaining data in buffer
+    if (currentChunkData.length > 0) {
+      console.log(`💾 Saving final chunk ${currentChunkIndex} (${currentChunkData.length} records)...`);
+      await safeSetItem(`allCustomers_chunk_${currentChunkIndex}`, JSON.stringify(currentChunkData));
+      currentChunkIndex++;
+    }
+    
+    console.log(`✅ Download complete: ${totalRecords} total customers in ${currentChunkIndex} chunks`);
     
     // Save final metadata
     await safeSetItem('allCustomers_chunks', currentChunkIndex.toString());
     await safeSetItem('allCustomers_count', totalRecords.toString());
     await safeSetItem('allCustomers_timestamp', new Date().toISOString());
-    
-    // Update manifest as complete
     await safeSetItem('allCustomers_manifest', JSON.stringify({
       status: 'complete',
       completedAt: new Date().toISOString(),
       totalRecords,
-      batchSize: BATCH_SIZE,
+      totalChunks: currentChunkIndex,
       batches: currentPage,
     }));
+    
+    if (onProgress) {
+      onProgress({ current: totalRecords, total: totalRecords, percentage: 100 });
+    }
     
     console.log('💾 Customer data cached successfully');
     return true;
@@ -437,6 +643,185 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
       throw new Error('Storage is full. Please clear some space and try again.');
     }
     
+    throw error;
+  }
+};
+
+// Resume downloading missing customer data (continues from where it left off)
+export const resumeCustomerDownload = async (onProgress = null, opts = {}) => {
+  const BATCH_SIZE = 5000;
+  const CHUNK_SIZE = 5000;
+  const API_URL = 'https://api.davao-water.gov.ph/dcwd-gis/api/v1/admin/customer/all';
+  
+  try {
+    console.log('🔄 Resuming customer data download...');
+    
+    // Check authentication
+    const token = await AsyncStorage.getItem('token');
+    if (!token) {
+      throw new Error('Authentication required. Please log in first.');
+    }
+    
+    // Check current download status
+    const integrityCheck = await checkCustomerDataIntegrity();
+    console.log('📊 Current integrity status:', integrityCheck);
+    
+    if (integrityCheck.complete) {
+      console.log('✅ Data already complete, no resume needed');
+      if (onProgress) onProgress({ current: integrityCheck.totalRecords, percentage: 100 });
+      return true;
+    }
+    
+    // Get how many records we already have
+    const existingRecords = integrityCheck.loadedRecords || 0;
+    const existingChunks = integrityCheck.totalChunks || 0;
+    const estimatedTotal = 280000; // Estimated total
+    
+    console.log(`📊 Resuming from: ${existingRecords} records, ${existingChunks} chunks`);
+    
+    // Calculate starting point
+    let currentChunkIndex = existingChunks;
+    let totalRecords = existingRecords;
+    let currentChunkData = [];
+    
+    // Calculate API offset - we need to start from exactly where we left off
+    const startOffset = existingRecords;
+    let currentPage = Math.floor(startOffset / BATCH_SIZE) + 1;
+    let hasMore = true;
+    
+    console.log(`📥 Starting from page ${currentPage}, offset ${startOffset}...`);
+    
+    // Update manifest to show resuming
+    await safeSetItem('allCustomers_manifest', JSON.stringify({
+      status: 'resuming',
+      resumedAt: new Date().toISOString(),
+      resumedFromRecords: existingRecords,
+      resumedFromChunks: existingChunks,
+    }));
+    
+    while (hasMore) {
+      try {
+        const offset = (currentPage - 1) * BATCH_SIZE;
+        console.log(`📦 Fetching batch ${currentPage} (offset: ${offset})...`);
+        
+        const response = await devApi.get(API_URL, {
+          params: {
+            limit: BATCH_SIZE,
+            offset: offset,
+            page: currentPage,
+          },
+          timeout: 120000, // 2 minute timeout
+        });
+        
+        const batchData = response?.data?.data || response?.data || [];
+        const records = Array.isArray(batchData) ? batchData : (batchData.records || batchData.customers || []);
+        
+        console.log(`✅ Batch ${currentPage} received: ${records.length} records`);
+        
+        if (records.length === 0) {
+          hasMore = false;
+          console.log('📊 No more records to fetch');
+          break;
+        }
+        
+        // Add records to buffer and save chunks when full
+        for (const record of records) {
+          currentChunkData.push(record);
+          totalRecords++;
+          
+          if (currentChunkData.length >= CHUNK_SIZE) {
+            console.log(`💾 Saving chunk ${currentChunkIndex} (${currentChunkData.length} records)...`);
+            await safeSetItem(`allCustomers_chunk_${currentChunkIndex}`, JSON.stringify(currentChunkData));
+            await safeSetItem('allCustomers_chunks', (currentChunkIndex + 1).toString());
+            await safeSetItem('allCustomers_count', totalRecords.toString());
+            currentChunkIndex++;
+            currentChunkData = [];
+          }
+        }
+        
+        // Report progress - use batch-based detection for completion
+        if (onProgress) {
+          const isLastBatch = records.length < BATCH_SIZE;
+          let percentage;
+          
+          if (isLastBatch) {
+            percentage = 100;
+          } else if (estimatedTotal > 0 && estimatedTotal > totalRecords) {
+            percentage = Math.min(95, Math.round((totalRecords / estimatedTotal) * 100));
+          } else {
+            percentage = Math.min(95, currentPage * 2);
+          }
+          
+          onProgress({
+            current: totalRecords,
+            total: estimatedTotal || totalRecords,
+            percentage,
+            resumed: true,
+          });
+        }
+        
+        // Check if last batch
+        if (records.length < BATCH_SIZE) {
+          hasMore = false;
+          console.log('📊 Last batch received');
+        } else {
+          currentPage++;
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+        
+      } catch (batchError) {
+        console.error(`❌ Error fetching batch ${currentPage}:`, batchError.message);
+        
+        // Save remaining buffer
+        if (currentChunkData.length > 0) {
+          console.log(`💾 Saving partial chunk ${currentChunkIndex} before stopping...`);
+          await safeSetItem(`allCustomers_chunk_${currentChunkIndex}`, JSON.stringify(currentChunkData));
+          await safeSetItem('allCustomers_chunks', (currentChunkIndex + 1).toString());
+          await safeSetItem('allCustomers_count', totalRecords.toString());
+          currentChunkIndex++;
+        }
+        
+        // Update manifest as partial
+        await safeSetItem('allCustomers_manifest', JSON.stringify({
+          status: 'partial',
+          partialAt: new Date().toISOString(),
+          totalRecords,
+          totalChunks: currentChunkIndex,
+        }));
+        
+        throw new Error(`Download paused at ${totalRecords} records. You can continue later.`);
+      }
+    }
+    
+    // Save remaining data
+    if (currentChunkData.length > 0) {
+      console.log(`💾 Saving final chunk ${currentChunkIndex} (${currentChunkData.length} records)...`);
+      await safeSetItem(`allCustomers_chunk_${currentChunkIndex}`, JSON.stringify(currentChunkData));
+      currentChunkIndex++;
+    }
+    
+    console.log(`✅ Resume complete: ${totalRecords} total customers in ${currentChunkIndex} chunks`);
+    
+    // Save final metadata
+    await safeSetItem('allCustomers_chunks', currentChunkIndex.toString());
+    await safeSetItem('allCustomers_count', totalRecords.toString());
+    await safeSetItem('allCustomers_timestamp', new Date().toISOString());
+    await safeSetItem('allCustomers_manifest', JSON.stringify({
+      status: 'complete',
+      completedAt: new Date().toISOString(),
+      totalRecords,
+      totalChunks: currentChunkIndex,
+      resumed: true,
+    }));
+    
+    if (onProgress) {
+      onProgress({ current: totalRecords, total: totalRecords, percentage: 100 });
+    }
+    
+    return true;
+    
+  } catch (error) {
+    console.error('❌ resumeCustomerDownload error:', error.message || error);
     throw error;
   }
 };
@@ -545,7 +930,13 @@ export const fetchLeakReports = async (empId) => {
       totalCount: responseData.totalCount || 0
     };
   } catch (err) {
-    console.error('fetchLeakReports error', err?.response?.data || err.message || err);
+    // Handle 404 silently - it usually means no reports found for this user
+    const status = err?.response?.status;
+    if (status === 404) {
+      console.log('📋 No leak reports found for user (404 response)');
+    } else {
+      console.error('fetchLeakReports error', err?.response?.data || err.message || err);
+    }
     return {
       reports: [],
       reportedCount: 0,
@@ -607,13 +998,23 @@ export const submitLeakReport = async (reportData) => {
       processed: (reportData.meterData?.accountNumber || '').replace(/\D/g, '').slice(-6)
     });
     
-    // Build geometry string in multiple formats
+    // Build geometry string - coordinates is the LEAK location (may differ from meter)
     const longitude = reportData.coordinates?.longitude || 125.598699;
     const latitude = reportData.coordinates?.latitude || 7.060698;
     const geomString = `${longitude}, ${latitude}`;
     const wktPoint = `POINT(${longitude} ${latitude})`; // WKT format for GIS
     
-    console.log('📍 Geometry:', { longitude, latitude, geomString, wktPoint });
+    // Log meter vs leak location for debugging
+    console.log('📍 Leak Location (Geom):', { longitude, latitude, geomString });
+    if (reportData.meterCoordinates) {
+      console.log('🚰 Meter Location (Reference):', {
+        latitude: reportData.meterCoordinates.latitude,
+        longitude: reportData.meterCoordinates.longitude,
+      });
+    }
+    if (reportData.leakLocationMethod) {
+      console.log('📍 Leak location method:', reportData.leakLocationMethod);
+    }
     
     // Map frontend fields to backend expected fields
     const mappedData = {
@@ -635,7 +1036,7 @@ export const submitLeakReport = async (reportData) => {
       LeakCovering: getCoveringId(reportData.covering),
       Priority: 2, // Default priority
       ReportType: 1, // Default report type
-      DispatchStat: 1, // Default status: Reported
+      DispatchStat: 0, // Default status: Pending (0=Pending, changed from web)
       LeakIndicator: 1, // Add leak indicator (required by backend)
       LeakLocation: reportData.location === 'Surface' ? 1 : 2, // 1=Surface, 2=Non-Surface
       DtReported: new Date().toISOString(), // Add timestamp
@@ -668,10 +1069,12 @@ export const submitLeakReport = async (reportData) => {
   formData.append('LeakCovering', mappedData.LeakCovering || 0);
   formData.append('Priority', mappedData.Priority || 0);
   formData.append('ReportType', mappedData.ReportType || 0);
-  formData.append('DispatchStat', mappedData.DispatchStat || 0);
+  formData.append('DispatchStat', 0); // Always 0 (Pending) - status changed from web only
   formData.append('LeakIndicator', mappedData.LeakIndicator || 0);
   formData.append('LeakLocation', mappedData.LeakLocation || 0);
   formData.append('ReporterType', mappedData.ReporterType || 0);
+  
+  console.log('📤 DispatchStat being sent:', 0, '(Pending)');
     
     // Image files - properly format for React Native FormData
     if (reportData.leakPhotos && reportData.leakPhotos.length > 0) {
@@ -741,6 +1144,7 @@ export const submitLeakReport = async (reportData) => {
 };
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { handleSessionExpiry } from './autoLogout';
 
 // API Base URL
 export const API_BASE = 'https://api.davao-water.gov.ph/dcwd-gis/api/v1';
@@ -817,11 +1221,21 @@ devApi.interceptors.response.use(
         return devApi(originalRequest);
       } catch (err) {
         processQueue(err, null);
+        console.log('[Interceptor] 🔒 Token refresh failed - triggering session expiry');
         await AsyncStorage.multiRemove(['token', 'refresh_token', 'userData']);
+        // Trigger auto-logout due to session expiry
+        handleSessionExpiry();
         return Promise.reject(err);
       } finally {
         isRefreshing = false;
       }
+    }
+
+    // Also handle direct 401 errors (not just Token Expired message)
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      console.log('[Interceptor] 🔒 Unauthorized (401) - triggering session expiry');
+      await AsyncStorage.multiRemove(['token', 'refresh_token', 'userData']);
+      handleSessionExpiry();
     }
 
     return Promise.reject(error);

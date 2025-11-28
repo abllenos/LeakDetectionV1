@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AppNavigator from './navigation/AppNavigator';
 import { StoreContext, rootStore } from './stores/RootStore';
 import { stopLocationTracking } from './services/locationTracker';
+import { initAutoLogout, stopAutoLogout, recordActivity } from './services/autoLogout';
 
 // Suppress known MobX-React Navigation compatibility warnings
 LogBox.ignoreLogs([
@@ -109,12 +110,52 @@ export default function App() {
     
     const init = async () => {
       try {
+        // Set up auto-logout callback for idle timeout (30 min) and session expiry
+        const handleAutoLogout = async (reason) => {
+          console.log(`[App] Auto-logout triggered. Reason: ${reason}`);
+          
+          // Show alert based on reason
+          const message = reason === 'session_expired' 
+            ? 'Your session has expired. Please log in again.'
+            : reason === 'idle_timeout' || reason === 'background_timeout'
+            ? 'You have been logged out due to inactivity (30 minutes).'
+            : 'You have been logged out.';
+          
+          // Stop location tracking
+          stopLocationTracking();
+          
+          // Stop auto-logout monitoring
+          stopAutoLogout();
+          
+          // Clear auth state
+          await rootStore.authStore.handleLogout();
+          
+          // Navigate to splash screen
+          if (navigationRef.current) {
+            navigationRef.current.reset({
+              index: 0,
+              routes: [{ name: 'Splash' }],
+            });
+          }
+          
+          // Show alert after navigation
+          setTimeout(() => {
+            Alert.alert('Session Ended', message);
+          }, 500);
+        };
+        
+        // Initialize auto-logout service (30 min idle timeout)
+        initAutoLogout(handleAutoLogout);
+        
         // Set up logout callback for 24-hour timeout
         rootStore.offlineStore.setLogoutCallback(async () => {
           console.log('[App] 24-hour offline timeout - forcing logout');
           
           // Stop location tracking
           stopLocationTracking();
+          
+          // Stop auto-logout
+          stopAutoLogout();
           
           // Logout and clear auth
           await rootStore.authStore.handleLogout();
@@ -142,6 +183,7 @@ export default function App() {
         unsubscribe();
       }
       rootStore.offlineStore.cleanup();
+      stopAutoLogout();
     };
   }, []);
   

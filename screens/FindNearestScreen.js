@@ -29,15 +29,19 @@ const FindNearestScreen = observer(({ navigation }) => {
         return;
       }
 
-      locationStore.setStatus('Getting your current location...');
+      locationStore.setStatus('Getting your location...');
+      
+      // Get single high-accuracy GPS reading
       const loc = await Location.getCurrentPositionAsync({ 
-        accuracy: Location.Accuracy.Highest 
+        accuracy: Location.Accuracy.BestForNavigation,
       });
-
-      const coords = { 
-        latitude: loc.coords.latitude, 
-        longitude: loc.coords.longitude 
+      
+      const coords = {
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude
       };
+      
+      console.log(`📍 GPS location: ${coords.latitude}, ${coords.longitude} (accuracy: ${loc.coords.accuracy?.toFixed(1)}m)`);
 
       locationStore.setCurrentLocation(coords);
       locationStore.setStatus('Finding nearest meters...');

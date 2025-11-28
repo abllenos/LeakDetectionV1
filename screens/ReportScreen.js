@@ -16,6 +16,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
   const [routeCoordinates, setRouteCoordinates] = React.useState([]);
   const [hasError, setHasError] = React.useState(false);
   const [nearestMeterData, setNearestMeterData] = React.useState(null);
+  const [scrollEnabled, setScrollEnabled] = React.useState(true);
   
   // Error boundary effect
   useEffect(() => {
@@ -89,10 +90,10 @@ const ReportScreenInner = observer(({ navigation, params }) => {
 
   // Update route when drag pin changes (with debouncing to reduce API calls)
   React.useEffect(() => {
-    if (store.dragPin && store.marker) {
+    if (store.dragPin && store.userGpsLocation) {
       // Debounce: only fetch route after user stops dragging for 500ms
       const timeoutId = setTimeout(() => {
-        fetchRoadRoute(toJS(store.marker), toJS(store.dragPin));
+        fetchRoadRoute(toJS(store.userGpsLocation), toJS(store.dragPin));
       }, 500);
       
       return () => clearTimeout(timeoutId);
@@ -101,12 +102,12 @@ const ReportScreenInner = observer(({ navigation, params }) => {
 
   // Update route when a meter is searched and found
   React.useEffect(() => {
-    if (store.currentMeterDetails?.latitude && store.currentMeterDetails?.longitude && store.marker && !store.dragMode) {
+    if (store.currentMeterDetails?.latitude && store.currentMeterDetails?.longitude && store.userGpsLocation && !store.dragMode) {
       const meterLocation = {
         latitude: store.currentMeterDetails.latitude,
         longitude: store.currentMeterDetails.longitude
       };
-      fetchRoadRoute(toJS(store.marker), meterLocation);
+      fetchRoadRoute(toJS(store.userGpsLocation), meterLocation);
     }
   }, [store.currentMeterDetails?.latitude, store.currentMeterDetails?.longitude, fetchRoadRoute, store.dragMode]);
 
@@ -270,6 +271,67 @@ const ReportScreenInner = observer(({ navigation, params }) => {
     }
   }, [params]);
 
+  // Handle fromDraft - navigate to form with draft data
+  useEffect(() => {
+    const fromDraft = params?.fromDraft;
+    const draftData = params?.draftData;
+    const draftId = params?.draftId;
+    
+    if (fromDraft && draftData) {
+      console.log('📝 Loading draft:', draftId);
+      
+      // Navigate to form with draft data
+      navigation.navigate('LeakReportForm', {
+        meterData: draftData.meterData || null,
+        coordinates: draftData.coordinates || null,
+        fromNearest: false,
+        fromDraft: true,
+        draftId: draftId,
+        draftData: draftData,
+      });
+      
+      // Clear params
+      try { navigation.setParams({ fromDraft: null, draftData: null, draftId: null }); } catch (e) { /* noop */ }
+    }
+  }, [params?.fromDraft]);
+
+  // Handle selectLeakLocation mode - for selecting where the actual leak is (from LeakReportForm)
+  const [leakSelectionMode, setLeakSelectionMode] = React.useState(false);
+  const [leakSelectionData, setLeakSelectionData] = React.useState(null);
+  
+  useEffect(() => {
+    const selectLeakLocation = params?.selectLeakLocation;
+    const meterCoordinates = params?.meterCoordinates;
+    const meterDataParam = params?.meterData;
+    
+    if (selectLeakLocation && meterCoordinates) {
+      console.log('🎯 Entering leak location selection mode');
+      setLeakSelectionMode(true);
+      setLeakSelectionData({ meterCoordinates, meterData: meterDataParam });
+      
+      // Center map on meter location
+      if (meterCoordinates?.latitude && meterCoordinates?.longitude) {
+        const nextRegion = {
+          latitude: meterCoordinates.latitude,
+          longitude: meterCoordinates.longitude,
+          latitudeDelta: 0.003,
+          longitudeDelta: 0.003,
+        };
+        mapRef.current?.animateToRegion(nextRegion, 800);
+        
+        // Start drag mode with pin at meter location (user will drag to leak location)
+        store.setDragMode(true);
+        store.setDragPin({
+          latitude: meterCoordinates.latitude,
+          longitude: meterCoordinates.longitude,
+        });
+      }
+      
+      // Clear params
+      try { navigation.setParams({ selectLeakLocation: null, meterCoordinates: null, meterData: null }); } catch (e) { /* noop */ }
+    }
+  }, [params?.selectLeakLocation]);
+
   // Clear nearest meter data when screen gains focus (after navigating back)
   useFocusEffect(
     React.useCallback(() => {
@@ -334,6 +396,48 @@ const ReportScreenInner = observer(({ navigation, params }) => {
   };
 
   const reportLeak = () => {
+    // Handle leak location selection mode - return leak location back to LeakReportForm
+    if (leakSelectionMode && leakSelectionData) {
+      const dragCoords = store.dragPin;
+      if (!dragCoords?.latitude || !dragCoords?.longitude) {
+        Alert.alert('No Location', 'Please drag the pin to where the leak is located.');
+        return;
+      }
+      
+      console.log('📍 Returning leak location:', dragCoords);
+      console.log('📍 Meter data to restore:', leakSelectionData.meterData);
+      console.log('📍 Meter coordinates to restore:', leakSelectionData.meterCoordinates);
+      
+      // Save data before resetting state
+      const savedMeterData = leakSelectionData.meterData;
+      const savedMeterCoordinates = leakSelectionData.meterCoordinates;
+      const savedLeakLocation = {
+        latitude: dragCoords.latitude,
+        longitude: dragCoords.longitude,
+      };
+      
+      // Reset leak selection mode
+      setLeakSelectionMode(false);
+      setLeakSelectionData(null);
+      store.setDragMode(false);
+      store.setDragPin(null);
+      
+      // Use goBack and pass params - this ensures we go back to the SAME screen instance
+      // Then immediately set params on that screen
+      navigation.navigate({
+        name: 'LeakReportForm',
+        params: {
+          meterData: savedMeterData,
+          coordinates: savedMeterCoordinates,
+          leakLocation: savedLeakLocation,
+          fromLeakLocationSelection: true,
+          _timestamp: Date.now(), // Force param change detection
+        },
+        merge: true, // Merge with existing params
+      });
+      return;
+    }
+    
     // If in drag mode with a drag pin, go directly to form with drag pin location
     if (store.dragMode && store.dragPin) {
       const coords = {
@@ -518,6 +622,8 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        scrollEnabled={scrollEnabled}
+        nestedScrollEnabled={true}
       >
         {/* Search bar */}
         <View style={styles.searchRow}>
@@ -547,15 +653,52 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         </TouchableOpacity>
       </View>
 
+      {/* Leak Location Selection Mode Banner */}
+      {leakSelectionMode && (
+        <View style={styles.leakSelectionBanner}>
+          <Ionicons name="water" size={18} color="#991b1b" />
+          <Text style={styles.leakSelectionBannerText}>
+            Drag the red pin to where the leak is located
+          </Text>
+          <TouchableOpacity 
+            onPress={() => {
+              setLeakSelectionMode(false);
+              setLeakSelectionData(null);
+              store.setDragMode(false);
+              store.setDragPin(null);
+              navigation.goBack();
+            }}
+            style={styles.leakSelectionCancelBtn}
+          >
+            <Text style={styles.leakSelectionCancelText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Map */}
-      <View style={styles.mapWrap}>
+      <View 
+        style={styles.mapWrap}
+        onTouchStart={() => setScrollEnabled(false)}
+        onTouchEnd={() => setScrollEnabled(true)}
+        onTouchCancel={() => setScrollEnabled(true)}
+      >
         <LeafletMap
-          latitude={store.marker.latitude}
-          longitude={store.marker.longitude}
-          zoom={15}
+          key={`map-${store.currentMeterDetails?.latitude?.toFixed(4) || 'none'}-${store.currentMeterDetails?.longitude?.toFixed(4) || 'none'}`}
+          latitude={store.currentMeterDetails?.latitude || store.marker.latitude}
+          longitude={store.currentMeterDetails?.longitude || store.marker.longitude}
+          zoom={18}
           markers={[
+            // Show meter marker in leak selection mode (fixed, green)
+            ...(leakSelectionMode && leakSelectionData?.meterCoordinates ? [{
+              latitude: leakSelectionData.meterCoordinates.latitude,
+              longitude: leakSelectionData.meterCoordinates.longitude,
+              title: '🚰 Meter Location',
+              description: `${leakSelectionData.meterData?.meterNumber || 'N/A'} (fixed)`,
+              color: '#10b981',
+              label: '🚰'
+            }] : []),
             // Add selected meter marker if available (from search or confirmUseNearest)
-            ...(store.currentMeterDetails?.latitude && store.currentMeterDetails?.longitude && !store.dragMode ? [{
+            ...(!leakSelectionMode && store.currentMeterDetails?.latitude && store.currentMeterDetails?.longitude && !store.dragMode ? [{
               latitude: store.currentMeterDetails.latitude,
               longitude: store.currentMeterDetails.longitude,
               title: '🚰 Selected Meter',
@@ -568,7 +711,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
               latitude: store.dragPin.latitude,
               longitude: store.dragPin.longitude,
               title: store.dragMode ? '📍 Drag to set location' : '✅ Selected Location',
-              description: `Lat: ${store.dragPin.latitude.toFixed(4)}, Lon: ${store.dragPin.longitude.toFixed(4)}`,
+              description: '',
               color: store.dragMode ? '#f59e0b' : '#10b981',
               label: store.dragMode ? '📌' : '✓'
             }] : [])
@@ -579,7 +722,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
             weight: 5,
             opacity: 0.8
           }] : []}
-          userLocation={{ latitude: store.marker.latitude, longitude: store.marker.longitude }}
+          userLocation={{ latitude: store.userGpsLocation.latitude, longitude: store.userGpsLocation.longitude }}
           showUserLocation={true}
           onMapPress={handleMapPress}
           style={StyleSheet.absoluteFill}
@@ -716,30 +859,10 @@ const ReportScreenInner = observer(({ navigation, params }) => {
           </TouchableOpacity>
         </View>
 
-        {/* Drag Mode Action Buttons */}
-        {store.dragMode && store.dragPin && (
-          <View style={styles.dragModeActions}>
-            <TouchableOpacity style={styles.cancelDragBtn} onPress={cancelDragMode}>
-              <Ionicons name="close-circle" size={20} color="#ef4444" />
-              <Text style={styles.cancelDragText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.confirmDragBtn} onPress={confirmDraggedLocation}>
-              <Ionicons name="checkmark-circle" size={20} color="#fff" />
-              <Text style={styles.confirmDragText}>Confirm Location</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
         {/* Tile Source Badge (top right) */}
         <View style={styles.tileSourceBadge}>
           <Ionicons name="map-outline" size={14} color="#1e5a8e" style={{ marginRight: 4 }} />
           <Text style={styles.tileSourceText}>{TILE_SOURCES[store.tileIndex].name}</Text>
-        </View>
-
-        {/* Coordinate pill */}
-        <View style={styles.coordPill}>
-          <Ionicons name="location" size={14} color="#fff" style={{ marginRight: 6 }} />
-          <Text style={styles.coordText}>{store.coordsLabel}</Text>
         </View>
 
         {/* Attribution */}
@@ -784,8 +907,13 @@ const ReportScreenInner = observer(({ navigation, params }) => {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.primaryBtn} onPress={reportLeak}>
-          <Text style={styles.primaryBtnText}>Report Leak</Text>
+        <TouchableOpacity 
+          style={[styles.primaryBtn, leakSelectionMode && styles.leakSelectionBtn]} 
+          onPress={reportLeak}
+        >
+          <Text style={styles.primaryBtnText}>
+            {leakSelectionMode ? 'Confirm Leak Location' : 'Report Leak'}
+          </Text>
         </TouchableOpacity>
       </View>
       </ScrollView>
@@ -907,6 +1035,42 @@ const styles = StyleSheet.create({
   searchResultAddress: {
     fontSize: 12,
     color: '#9aa5b1',
+  },
+  // Leak location selection mode styles
+  leakSelectionBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fee2e2',
+    marginHorizontal: 16,
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    gap: 8,
+  },
+  leakSelectionBannerText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#991b1b',
+    fontWeight: '500',
+  },
+  leakSelectionCancelBtn: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#dc2626',
+  },
+  leakSelectionCancelText: {
+    fontSize: 12,
+    color: '#dc2626',
+    fontWeight: '600',
+  },
+  leakSelectionBtn: {
+    backgroundColor: '#dc2626',
   },
   mapWrap: {
     marginTop: 12,

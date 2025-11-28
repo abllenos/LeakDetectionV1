@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,10 +17,195 @@ import * as ImagePicker from 'expo-image-picker';
 import { pushNotification } from '../services/notifications';
 import { submitLeakReport } from '../services/interceptor';
 import { observer } from 'mobx-react-lite';
-import { useLeakReportStore } from '../stores/RootStore';
+import { useLeakReportStore, useDraftsStore, useOfflineStore } from '../stores/RootStore';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
+import { saveCurrentFormData, clearCurrentFormData, saveToDrafts, setFormActive } from '../services/draftService';
 
-const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNearest, navigation }) => {
+const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coordinates: initialCoordinates, fromNearest, navigation, route }) => {
   const form = useLeakReportStore();
+  const draftsStore = useDraftsStore();
+  const offlineStore = useOfflineStore();
+  const [showPreview, setShowPreview] = React.useState(false);
+  const isFocused = useIsFocused();
+  
+  // Store meter data and coordinates in local state to persist across navigations
+  const [meterData, setMeterData] = React.useState(initialMeterData);
+  const [coordinates, setCoordinates] = React.useState(initialCoordinates);
+  
+  // Track if we've processed the leak location params
+  const processedTimestampRef = React.useRef(null);
+  
+  // Auto-save interval ref
+  const autoSaveIntervalRef = useRef(null);
+  
+  // Track if loading from draft
+  const [loadingFromDraft, setLoadingFromDraft] = React.useState(false);
+  const [currentDraftId, setCurrentDraftId] = React.useState(null);
+  
+  // Mark form as active when screen is focused, inactive when leaving
+  useEffect(() => {
+    // Mark form as active when entering
+    setFormActive(true);
+    console.log('[LeakReportForm] Form screen entered - marked as ACTIVE');
+    
+    return () => {
+      // Mark form as inactive when leaving (but NOT if going to map for location)
+      // The cleanup will run when unmounting
+      console.log('[LeakReportForm] Form screen cleanup');
+    };
+  }, []);
+  
+  // Handle navigation away - clear active flag only on real leave (not map selection)
+  useFocusEffect(
+    React.useCallback(() => {
+      // Screen focused
+      setFormActive(true);
+      
+      return () => {
+        // Screen unfocused - check if navigating to map for location selection
+        const currentRoute = navigation.getState?.()?.routes?.slice(-1)[0]?.name;
+        if (currentRoute !== 'LeakLocationSelection') {
+          // Not going to location selection, so we're really leaving
+          // Don't clear active flag here - let it be cleared only on submit/discard
+        }
+      };
+    }, [navigation])
+  );
+  
+  // Initialize meter data from props on mount
+  useEffect(() => {
+    if (initialMeterData) {
+      setMeterData(initialMeterData);
+    }
+    if (initialCoordinates) {
+      setCoordinates(initialCoordinates);
+    }
+  }, []);
+
+  // Load draft data if coming from drafts screen
+  useEffect(() => {
+    const params = route?.params || {};
+    if (params.fromDraft && params.draftData) {
+      setLoadingFromDraft(true);
+      setCurrentDraftId(params.draftId);
+      
+      const draft = params.draftData;
+      console.log('[LeakReportForm] Loading from draft:', draft.id);
+      
+      // Restore meter data and coordinates
+      if (draft.meterData) setMeterData(draft.meterData);
+      if (draft.coordinates) setCoordinates(draft.coordinates);
+      
+      // Restore form fields
+      if (draft.leakType) form.setLeakType(draft.leakType);
+      if (draft.location) form.setLocation(draft.location);
+      if (draft.contactName) form.setContactName(draft.contactName);
+      if (draft.contactNumber) form.setContactNumber(draft.contactNumber);
+      if (draft.landmark) form.setLandmark(draft.landmark);
+      if (draft.pressure) form.setPressure(draft.pressure);
+      if (draft.covering) form.setCovering(draft.covering);
+      if (draft.causeOfLeak) form.setCauseOfLeak(draft.causeOfLeak);
+      if (draft.causeOther) form.setCauseOther(draft.causeOther);
+      if (draft.dma) form.setDma(draft.dma);
+      if (draft.flagProjectLeak !== null) form.setFlagProjectLeak(draft.flagProjectLeak);
+      if (draft.featuredId) form.setFeaturedId(draft.featuredId);
+      
+      // Restore photos
+      if (draft.leakPhotos && draft.leakPhotos.length > 0) {
+        draft.leakPhotos.forEach(uri => form.addLeakPhoto(uri));
+      }
+      if (draft.landmarkPhoto) form.setLandmarkPhoto(draft.landmarkPhoto);
+      
+      // Restore leak location
+      if (draft.leakLatitude && draft.leakLongitude) {
+        form.setLeakLocation(draft.leakLatitude, draft.leakLongitude, draft.leakLocationMethod);
+      }
+      
+      setLoadingFromDraft(false);
+    }
+  }, [route?.params?.fromDraft]);
+
+  // Auto-save form data every 30 seconds
+  useEffect(() => {
+    const saveFormForRecovery = () => {
+      const formData = {
+        meterData,
+        coordinates,
+        leakType: form.leakType,
+        location: form.location,
+        contactName: form.contactName,
+        contactNumber: form.contactNumber,
+        landmark: form.landmark,
+        leakPhotos: form.leakPhotos,
+        landmarkPhoto: form.landmarkPhoto,
+        pressure: form.pressure,
+        covering: form.covering,
+        causeOfLeak: form.causeOfLeak,
+        causeOther: form.causeOther,
+        dma: form.dma,
+        flagProjectLeak: form.flagProjectLeak,
+        featuredId: form.featuredId,
+        leakLatitude: form.leakLatitude,
+        leakLongitude: form.leakLongitude,
+        leakLocationMethod: form.leakLocationMethod,
+      };
+      
+      // Only save if there's meaningful data
+      if (meterData || form.leakType || form.location || form.leakPhotos.length > 0) {
+        saveCurrentFormData(formData);
+      }
+    };
+    
+    // Save immediately when form changes
+    saveFormForRecovery();
+    
+    // Set up periodic auto-save
+    autoSaveIntervalRef.current = setInterval(saveFormForRecovery, 30000);
+    
+    return () => {
+      if (autoSaveIntervalRef.current) {
+        clearInterval(autoSaveIntervalRef.current);
+      }
+    };
+  }, [
+    meterData, coordinates, form.leakType, form.location, form.contactName,
+    form.contactNumber, form.landmark, form.leakPhotos, form.landmarkPhoto,
+    form.pressure, form.covering, form.causeOfLeak, form.causeOther,
+    form.dma, form.flagProjectLeak, form.featuredId, form.leakLatitude,
+    form.leakLongitude, form.leakLocationMethod
+  ]);
+
+  // Handle incoming leak location from map - MUST run before reset
+  // Using useLayoutEffect to ensure it runs synchronously before other effects
+  React.useLayoutEffect(() => {
+    const params = route?.params || {};
+    const timestamp = params._timestamp;
+    
+    console.log('📍 LeakReportForm LAYOUT EFFECT - checking params');
+    console.log('📍 params:', JSON.stringify(params));
+    console.log('📍 processedTimestampRef:', processedTimestampRef.current, 'current timestamp:', timestamp);
+    
+    if (params.fromLeakLocationSelection && params.leakLocation && timestamp && timestamp !== processedTimestampRef.current) {
+      console.log('📍 ✅ Processing leak location selection return in LAYOUT EFFECT!');
+      processedTimestampRef.current = timestamp;
+      
+      // Set the leak location IMMEDIATELY
+      const lat = params.leakLocation.latitude;
+      const lng = params.leakLocation.longitude;
+      console.log('📍 ✅ Setting leak location:', lat, lng);
+      form.setLeakLocation(lat, lng, 'dragPin');
+      
+      // Restore meter data if passed back
+      if (params.meterData) {
+        console.log('📍 Restoring meter data:', params.meterData);
+        setMeterData(params.meterData);
+      }
+      if (params.coordinates) {
+        console.log('📍 Restoring coordinates:', params.coordinates);
+        setCoordinates(params.coordinates);
+      }
+    }
+  }, [route?.params]);
 
   const pickLeakPhoto = async () => {
     if (form.leakPhotos.length >= 2) {
@@ -28,56 +213,20 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
       return;
     }
     
-    // Show options to choose camera or gallery
-    Alert.alert(
-      'Add Photo',
-      'Choose an option',
-      [
-        {
-          text: 'Take Photo',
-          onPress: async () => {
-            // Request camera permissions
-            const { status } = await ImagePicker.requestCameraPermissionsAsync();
-            if (status !== 'granted') {
-              Alert.alert('Permission required', 'Camera permissions are needed to take photos.');
-              return;
-            }
-            
-            const result = await ImagePicker.launchCameraAsync({
-              allowsEditing: false,
-              quality: 0.8,
-            });
-            if (!result.canceled && result.assets[0]) {
-              form.addLeakPhoto(result.assets[0].uri);
-            }
-          }
-        },
-        {
-          text: 'Choose from Gallery',
-          onPress: async () => {
-            // Request gallery permissions
-            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (status !== 'granted') {
-              Alert.alert('Permission required', 'Gallery permissions are needed to choose photos.');
-              return;
-            }
-            
-            const result = await ImagePicker.launchImageLibraryAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
-              allowsEditing: false,
-              quality: 0.8,
-            });
-            if (!result.canceled && result.assets[0]) {
-              form.addLeakPhoto(result.assets[0].uri);
-            }
-          }
-        },
-        {
-          text: 'Cancel',
-          style: 'cancel'
-        }
-      ]
-    );
+    // Request camera permissions and take photo
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission required', 'Camera permissions are needed to take photos.');
+      return;
+    }
+    
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: false,
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]) {
+      form.addLeakPhoto(result.assets[0].uri);
+    }
   };
 
   const removeLeakPhoto = (index) => {
@@ -85,60 +234,78 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
   };
 
   const pickLandmarkPhoto = async () => {
-    // Show options to choose camera or gallery
-    Alert.alert(
-      'Add Landmark Photo',
-      'Choose an option',
-      [
-        {
-          text: 'Take Photo',
-          onPress: async () => {
-            // Request camera permissions
-            const { status } = await ImagePicker.requestCameraPermissionsAsync();
-            if (status !== 'granted') {
-              Alert.alert('Permission required', 'Camera permissions are needed to take photos.');
-              return;
-            }
-            
-            const result = await ImagePicker.launchCameraAsync({
-              allowsEditing: false,
-              quality: 0.8,
-            });
-            if (!result.canceled && result.assets[0]) {
-              form.setLandmarkPhoto(result.assets[0].uri);
-            }
-          }
-        },
-        {
-          text: 'Choose from Gallery',
-          onPress: async () => {
-            // Request gallery permissions
-            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (status !== 'granted') {
-              Alert.alert('Permission required', 'Gallery permissions are needed to choose photos.');
-              return;
-            }
-            
-            const result = await ImagePicker.launchImageLibraryAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
-              allowsEditing: false,
-              quality: 0.8,
-            });
-            if (!result.canceled && result.assets[0]) {
-              form.setLandmarkPhoto(result.assets[0].uri);
-            }
-          }
-        },
-        {
-          text: 'Cancel',
-          style: 'cancel'
-        }
-      ]
-    );
+    // Request camera permissions and take photo
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission required', 'Camera permissions are needed to take photos.');
+      return;
+    }
+    
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: false,
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]) {
+      form.setLandmarkPhoto(result.assets[0].uri);
+    }
   };
 
   const removeLandmarkPhoto = () => {
     form.clearLandmarkPhoto();
+  };
+
+  // Save current form as draft
+  const handleSaveDraft = async () => {
+    const formData = {
+      meterData,
+      coordinates,
+      leakType: form.leakType,
+      location: form.location,
+      contactName: form.contactName,
+      contactNumber: form.contactNumber,
+      landmark: form.landmark,
+      leakPhotos: form.leakPhotos,
+      landmarkPhoto: form.landmarkPhoto,
+      pressure: form.pressure,
+      covering: form.covering,
+      causeOfLeak: form.causeOfLeak,
+      causeOther: form.causeOther,
+      dma: form.dma,
+      flagProjectLeak: form.flagProjectLeak,
+      featuredId: form.featuredId,
+      leakLatitude: form.leakLatitude,
+      leakLongitude: form.leakLongitude,
+      leakLocationMethod: form.leakLocationMethod,
+    };
+    
+    try {
+      if (currentDraftId) {
+        // Update existing draft
+        await draftsStore.updateDraft(currentDraftId, formData);
+      } else {
+        // Save as new draft
+        const draftId = await draftsStore.saveDraft(formData);
+        setCurrentDraftId(draftId);
+      }
+      
+      // Clear current form data since it's now in drafts
+      await clearCurrentFormData();
+      
+      Alert.alert('Saved', 'Report saved as draft.', [
+        { text: 'Continue Editing' },
+        { 
+          text: 'Go to Drafts', 
+          onPress: () => {
+            setFormActive(false); // Clear active flag when leaving
+            form.reset();
+            navigation.navigate('MainTabs', { screen: 'Drafts' });
+          }
+        },
+      ]);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to save draft.');
+      console.error('[LeakReportForm] Error saving draft:', error);
+    }
   };
 
   const handleSendReport = async () => {
@@ -167,11 +334,75 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
       Alert.alert('Missing info', 'Please provide contact person.');
       return;
     }
+    
+    // Show preview modal instead of sending directly
+    setShowPreview(true);
+  };
+
+  const confirmSendReport = async () => {
+    setShowPreview(false);
     form.submitting = true;
+    
+    // Check if offline - save as draft instead
+    if (!offlineStore.isOnline) {
+      try {
+        const formData = {
+          meterData,
+          coordinates,
+          leakType: form.leakType,
+          location: form.location,
+          contactName: form.contactName,
+          contactNumber: form.contactNumber,
+          landmark: form.landmark,
+          leakPhotos: form.leakPhotos,
+          landmarkPhoto: form.landmarkPhoto,
+          pressure: form.pressure,
+          covering: form.covering,
+          causeOfLeak: form.causeOfLeak,
+          causeOther: form.causeOther,
+          dma: form.dma,
+          flagProjectLeak: form.flagProjectLeak,
+          featuredId: form.featuredId,
+          leakLatitude: form.leakLatitude,
+          leakLongitude: form.leakLongitude,
+          leakLocationMethod: form.leakLocationMethod,
+        };
+        
+        await saveToDrafts(formData, { offlineSaved: true });
+        await clearCurrentFormData();
+        await setFormActive(false); // Clear active flag on offline save
+        
+        // Delete the draft if we were editing one
+        if (currentDraftId) {
+          await draftsStore.deleteDraft(currentDraftId);
+        }
+        
+        form.submitting = false;
+        Alert.alert(
+          'Saved Offline', 
+          'You are offline. Your report has been saved to drafts and will need to be submitted when you are back online.',
+          [{ text: 'OK', onPress: () => {
+            form.reset();
+            navigation.navigate('MainTabs', { screen: 'Drafts' });
+          }}]
+        );
+        return;
+      } catch (error) {
+        form.submitting = false;
+        Alert.alert('Error', 'Failed to save report offline.');
+        return;
+      }
+    }
+    
     try {
-      // Build Geom field for backend (comma-separated string)
-      const Geom = coordinates && coordinates.longitude && coordinates.latitude
-        ? `${coordinates.longitude}, ${coordinates.latitude}`
+      // Use leak location if set, otherwise use meter coordinates
+      const leakCoords = form.leakLatitude && form.leakLongitude
+        ? { latitude: form.leakLatitude, longitude: form.leakLongitude }
+        : coordinates;
+      
+      // Build Geom field for backend (comma-separated string) - this is the LEAK location
+      const Geom = leakCoords && leakCoords.longitude && leakCoords.latitude
+        ? `${leakCoords.longitude}, ${leakCoords.latitude}`
         : null;
       // Build payload for backend
       const payload = {
@@ -190,13 +421,26 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
   flagProjectLeak: form.flagProjectLeak,
   featuredId: form.featuredId,
   meterData,
-  coordinates,
+  coordinates: leakCoords, // This is the actual leak location (or meter location if not set)
+  meterCoordinates: coordinates, // Original meter coordinates for reference
   geom: Geom,
+  leakLocationMethod: form.leakLocationMethod, // 'current', 'dragPin', or null
       };
       await submitLeakReport(payload);
+      
+      // Clear current form data and delete draft if editing
+      await clearCurrentFormData();
+      await setFormActive(false); // Clear active flag on successful submit
+      if (currentDraftId) {
+        await draftsStore.deleteDraft(currentDraftId);
+      }
+      
       form.submitting = false;
       Alert.alert('Report sent', 'Your leak report has been submitted successfully.', [
-        { text: 'OK', onPress: () => navigation.goBack() },
+        { text: 'OK', onPress: () => {
+          form.reset();
+          navigation.goBack();
+        }},
       ]);
       try {
         pushNotification({
@@ -215,7 +459,11 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
 
   // Load DMA options from server on mount
   useEffect(() => {
-    form.reset();
+    // Don't reset if we're returning from leak location selection
+    const params = route?.params || {};
+    if (!params.fromLeakLocationSelection) {
+      form.reset();
+    }
     form.loadDmaOptions();
     return () => {};
   }, []);
@@ -262,9 +510,74 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
               <Text style={styles.infoValue}>{meterData?.address || ''}</Text>
             </View>
           </View>
-          <Text style={styles.coordsText}>
-            Coordinates: {coordinates?.latitude ? coordinates.latitude.toFixed(6) : 'N/A'}, {coordinates?.longitude ? coordinates.longitude.toFixed(6) : 'N/A'}
-          </Text>
+        </View>
+
+        {/* Leak Location Section */}
+        <View style={styles.leakLocationCard}>
+          <View style={styles.leakLocationHeader}>
+            <Ionicons name="pin" size={18} color="#dc2626" />
+            <Text style={styles.leakLocationTitle}>  Leak Location</Text>
+          </View>
+          
+          {form.leakLatitude && form.leakLongitude ? (
+            <View style={styles.leakLocationSet}>
+              <Text style={styles.leakMethodText}>
+                {form.leakLocationMethod === 'current' ? '📍 Using current GPS location' : '🗺️ Selected on map'}
+              </Text>
+              <TouchableOpacity 
+                style={styles.clearLeakLocationBtn}
+                onPress={() => form.clearLeakLocation()}
+              >
+                <Ionicons name="close-circle" size={16} color="#dc2626" />
+                <Text style={styles.clearLeakLocationText}>Clear & use meter location</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.leakLocationOptions}>
+              <Text style={styles.leakLocationHint}>
+                Where is the actual leak? (If different from meter location)
+              </Text>
+              <View style={styles.leakLocationButtons}>
+                <TouchableOpacity
+                  style={styles.leakLocationBtn}
+                  onPress={async () => {
+                    try {
+                      const { status } = await require('expo-location').requestForegroundPermissionsAsync();
+                      if (status !== 'granted') {
+                        Alert.alert('Permission denied', 'Location permission is required');
+                        return;
+                      }
+                      const location = await require('expo-location').getCurrentPositionAsync({
+                        accuracy: require('expo-location').Accuracy.BestForNavigation
+                      });
+                      form.setLeakLocation(location.coords.latitude, location.coords.longitude, 'current');
+                    } catch (err) {
+                      Alert.alert('Error', 'Could not get current location');
+                    }
+                  }}
+                >
+                  <Ionicons name="navigate" size={18} color="#fff" />
+                  <Text style={styles.leakLocationBtnText}>Use Current Location</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.leakLocationBtn, styles.leakLocationBtnSecondary]}
+                  onPress={() => {
+                    navigation.navigate('ReportMap', { 
+                      selectLeakLocation: true,
+                      meterCoordinates: coordinates,
+                      meterData: meterData,
+                    });
+                  }}
+                >
+                  <Ionicons name="map" size={18} color="#1e5a8e" />
+                  <Text style={[styles.leakLocationBtnText, { color: '#1e5a8e' }]}>Drag Pin on Map</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.leakLocationNote}>
+                💡 Skip this if the leak is at the meter location
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Instructions */}
@@ -287,7 +600,7 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
         </View>
 
         {/* Leak Type */}
-        <Text style={styles.sectionLabel}>Leak Type</Text>
+        <Text style={styles.sectionLabel}>Leak Type <Text style={{ color: '#ef4444' }}>*</Text></Text>
         <View style={styles.buttonGrid}>
           <TouchableOpacity
             style={[styles.choiceBtn, form.leakType === 'Unidentified' && styles.choiceBtnActive]}
@@ -318,7 +631,7 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
         </View>
 
         {/* Location */}
-        <Text style={styles.sectionLabel}>Location</Text>
+        <Text style={styles.sectionLabel}>Location <Text style={{ color: '#ef4444' }}>*</Text></Text>
         <View style={styles.buttonGrid}>
           <TouchableOpacity
             style={[styles.choiceBtn, form.location === 'Surface' && styles.choiceBtnActive]}
@@ -428,8 +741,8 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
           </>
         )}
 
-        {/* Flag Project Leak */}
-        <Text style={styles.sectionLabel}>Flag Project Leak</Text>
+        {/* Asterra */}
+        <Text style={styles.sectionLabel}>Asterra <Text style={{ color: '#ef4444' }}>*</Text></Text>
         <View style={styles.buttonGrid}>
           <TouchableOpacity
             style={[styles.choiceBtn, form.flagProjectLeak === 0 && styles.choiceBtnActive]}
@@ -477,7 +790,7 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
         </View>
 
         {/* Reported Landmark */}
-        <Text style={styles.sectionLabel}>Reported Landmark</Text>
+        <Text style={styles.sectionLabel}>Reported Landmark <Text style={{ color: '#ef4444' }}>*</Text></Text>
         <View style={styles.inputWrap}>
           <Ionicons name="location-outline" size={18} color="#9aa5b1" style={{ marginRight: 10 }} />
           <TextInput
@@ -495,7 +808,7 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
           <Text style={styles.photoSectionText}>  Add photos to help identify the leak</Text>
         </View>
         <View style={styles.photoHeader}>
-          <Text style={styles.photoLabel}>Leak Photos (2 only)</Text>
+          <Text style={styles.photoLabel}>Leak Photos (2 only) <Text style={{ color: '#ef4444' }}>*</Text></Text>
           <Text style={styles.photoCount}>{form.leakPhotos.length}/2</Text>
         </View>
         
@@ -546,17 +859,173 @@ const LeakReportFormScreenInner = observer(({ meterData, coordinates, fromNeares
           <Text style={styles.footerNoteText}>  Report will be sent to our team</Text>
         </View>
 
-        {/* Send Report Button */}
-        <TouchableOpacity style={styles.sendBtn} onPress={handleSendReport} disabled={form.submitting}>
-          {form.submitting ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.sendBtnText}>Send Report</Text>
-          )}
-        </TouchableOpacity>
+        {/* Buttons Row */}
+        <View style={styles.buttonRow}>
+          {/* Save Draft Button */}
+          <TouchableOpacity 
+            style={styles.saveDraftBtn} 
+            onPress={handleSaveDraft}
+          >
+            <Ionicons name="save-outline" size={20} color="#3b82f6" />
+            <Text style={styles.saveDraftBtnText}>Save Draft</Text>
+          </TouchableOpacity>
+          
+          {/* Send Report Button */}
+          <TouchableOpacity 
+            style={[styles.sendBtn, !offlineStore.isOnline && styles.sendBtnOffline]} 
+            onPress={handleSendReport} 
+            disabled={form.submitting}
+          >
+            {form.submitting ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                {!offlineStore.isOnline && <Ionicons name="cloud-offline" size={18} color="#fff" style={{ marginRight: 6 }} />}
+                <Text style={styles.sendBtnText}>{offlineStore.isOnline ? 'Send Report' : 'Save Offline'}</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* Preview Modal */}
+      <Modal visible={showPreview} animationType="slide" transparent onRequestClose={() => setShowPreview(false)}>
+        <View style={styles.previewOverlay}>
+          <View style={styles.previewCard}>
+            <View style={styles.previewHeader}>
+              <Ionicons name="document-text" size={24} color="#1e5a8e" />
+              <Text style={styles.previewTitle}>Review Your Report</Text>
+              <TouchableOpacity onPress={() => setShowPreview(false)} style={styles.previewCloseBtn}>
+                <Ionicons name="close" size={24} color="#6b7280" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.previewScroll} showsVerticalScrollIndicator={false}>
+              {/* Meter Info */}
+              <View style={styles.previewSection}>
+                <Text style={styles.previewSectionTitle}>Meter Information</Text>
+                <View style={styles.previewRow}>
+                  <Text style={styles.previewLabel}>Meter Number:</Text>
+                  <Text style={styles.previewValue}>{meterData?.meterNumber || 'N/A'}</Text>
+                </View>
+                <View style={styles.previewRow}>
+                  <Text style={styles.previewLabel}>Address:</Text>
+                  <Text style={styles.previewValue}>{meterData?.address || 'N/A'}</Text>
+                </View>
+                <View style={styles.previewRow}>
+                  <Text style={styles.previewLabel}>Coordinates:</Text>
+                  <Text style={styles.previewValue}>
+                    {coordinates?.latitude?.toFixed(6) || 'N/A'}, {coordinates?.longitude?.toFixed(6) || 'N/A'}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Leak Details */}
+              <View style={styles.previewSection}>
+                <Text style={styles.previewSectionTitle}>Leak Details</Text>
+                <View style={styles.previewRow}>
+                  <Text style={styles.previewLabel}>Pressure:</Text>
+                  <Text style={styles.previewValue}>{form.pressure || 'N/A'}</Text>
+                </View>
+                <View style={styles.previewRow}>
+                  <Text style={styles.previewLabel}>Leak Type:</Text>
+                  <Text style={styles.previewValue}>{form.leakType || 'N/A'}</Text>
+                </View>
+                <View style={styles.previewRow}>
+                  <Text style={styles.previewLabel}>Location:</Text>
+                  <Text style={styles.previewValue}>{form.location || 'N/A'}</Text>
+                </View>
+                <View style={styles.previewRow}>
+                  <Text style={styles.previewLabel}>Covering:</Text>
+                  <Text style={styles.previewValue}>{form.covering || 'N/A'}</Text>
+                </View>
+                <View style={styles.previewRow}>
+                  <Text style={styles.previewLabel}>Cause of Leak:</Text>
+                  <Text style={styles.previewValue}>
+                    {form.causeOfLeak === 'Others' ? form.causeOther : form.causeOfLeak || 'N/A'}
+                  </Text>
+                </View>
+                <View style={styles.previewRow}>
+                  <Text style={styles.previewLabel}>Asterra:</Text>
+                  <Text style={styles.previewValue}>{form.flagProjectLeak === 1 ? 'Under POI' : 'Not under POI'}</Text>
+                </View>
+                {form.flagProjectLeak === 1 && form.featuredId && (
+                  <View style={styles.previewRow}>
+                    <Text style={styles.previewLabel}>Featured ID:</Text>
+                    <Text style={styles.previewValue}>{form.featuredId}</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Contact Info */}
+              <View style={styles.previewSection}>
+                <Text style={styles.previewSectionTitle}>Contact Information</Text>
+                <View style={styles.previewRow}>
+                  <Text style={styles.previewLabel}>Contact Person:</Text>
+                  <Text style={styles.previewValue}>{form.contactName || 'N/A'}</Text>
+                </View>
+                {form.landmark && (
+                  <View style={styles.previewRow}>
+                    <Text style={styles.previewLabel}>Landmark:</Text>
+                    <Text style={styles.previewValue}>{form.landmark}</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Photos */}
+              <View style={styles.previewSection}>
+                <Text style={styles.previewSectionTitle}>Photos</Text>
+                <View style={styles.previewRow}>
+                  <Text style={styles.previewLabel}>Leak Photos:</Text>
+                  <Text style={styles.previewValue}>{form.leakPhotos.length} attached</Text>
+                </View>
+                {form.leakPhotos.length > 0 && (
+                  <View style={styles.previewPhotoRow}>
+                    {form.leakPhotos.map((uri, idx) => (
+                      <Image key={idx} source={{ uri }} style={styles.previewPhoto} />
+                    ))}
+                  </View>
+                )}
+                <View style={styles.previewRow}>
+                  <Text style={styles.previewLabel}>Landmark Photo:</Text>
+                  <Text style={styles.previewValue}>{form.landmarkPhoto ? '1 attached' : 'None'}</Text>
+                </View>
+                {form.landmarkPhoto && (
+                  <View style={styles.previewPhotoRow}>
+                    <Image source={{ uri: form.landmarkPhoto }} style={styles.previewPhoto} />
+                  </View>
+                )}
+              </View>
+            </ScrollView>
+
+            {/* Action Buttons */}
+            <View style={styles.previewActions}>
+              <TouchableOpacity 
+                style={styles.previewCancelBtn} 
+                onPress={() => setShowPreview(false)}
+              >
+                <Text style={styles.previewCancelText}>Edit Report</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.previewConfirmBtn} 
+                onPress={confirmSendReport}
+                disabled={form.submitting}
+              >
+                {form.submitting ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="send" size={18} color="#fff" style={{ marginRight: 8 }} />
+                    <Text style={styles.previewConfirmText}>Confirm & Send</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
     </SafeAreaView>
   );
@@ -568,6 +1037,7 @@ const LeakReportFormScreen = ({ navigation, route }) => {
   return (
     <LeakReportFormScreenInner 
       navigation={navigation} 
+      route={route}
       meterData={meterData}
       coordinates={coordinates}
       fromNearest={fromNearest}
@@ -609,6 +1079,101 @@ const styles = StyleSheet.create({
   infoLabel: { fontSize: 12, color: '#6b7280', marginBottom: 2 },
   infoValue: { fontSize: 14, color: '#111', fontWeight: '600' },
   coordsText: { fontSize: 12, color: '#6b7280', marginTop: 4, lineHeight: 16 },
+
+  // Leak Location styles
+  leakLocationCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    borderLeftWidth: 4,
+    borderLeftColor: '#dc2626',
+  },
+  leakLocationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  leakLocationTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#dc2626',
+  },
+  leakLocationSet: {
+    backgroundColor: '#fef2f2',
+    borderRadius: 8,
+    padding: 12,
+  },
+  leakCoordsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  leakCoordsText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#991b1b',
+  },
+  leakMethodText: {
+    fontSize: 12,
+    color: '#7f1d1d',
+    marginBottom: 8,
+  },
+  clearLeakLocationBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#fecaca',
+  },
+  clearLeakLocationText: {
+    fontSize: 12,
+    color: '#dc2626',
+    fontWeight: '500',
+  },
+  leakLocationOptions: {
+    gap: 10,
+  },
+  leakLocationHint: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginBottom: 4,
+  },
+  leakLocationButtons: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  leakLocationBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#dc2626',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    gap: 6,
+  },
+  leakLocationBtnSecondary: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#1e5a8e',
+  },
+  leakLocationBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  leakLocationNote: {
+    fontSize: 12,
+    color: '#9ca3af',
+    textAlign: 'center',
+    marginTop: 4,
+  },
 
   instructionRow: {
     flexDirection: 'row',
@@ -716,17 +1281,43 @@ const styles = StyleSheet.create({
   },
   footerNoteText: { fontSize: 12, color: '#6b7280' },
 
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  saveDraftBtn: {
+    flex: 1,
+    backgroundColor: '#fff',
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    borderWidth: 2,
+    borderColor: '#3b82f6',
+  },
+  saveDraftBtnText: {
+    color: '#3b82f6',
+    fontSize: 14,
+    fontWeight: '700',
+    marginLeft: 6,
+  },
   sendBtn: {
+    flex: 2,
     backgroundColor: '#1e5a8e',
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+  },
+  sendBtnOffline: {
+    backgroundColor: '#6366f1',
   },
   sendBtnText: { color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: 0.5 },
   radioGroup: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
@@ -774,4 +1365,113 @@ const styles = StyleSheet.create({
   dmaText: { fontSize: 14, color: '#334155' },
   modalCancel: { alignItems: 'center', paddingVertical: 12 },
   modalCancelText: { color: '#1e5a8e', fontWeight: '700' },
+  
+  // Preview Modal Styles
+  previewOverlay: { 
+    flex: 1, 
+    backgroundColor: 'rgba(0,0,0,0.5)', 
+    justifyContent: 'flex-end',
+  },
+  previewCard: { 
+    backgroundColor: '#fff', 
+    borderTopLeftRadius: 24, 
+    borderTopRightRadius: 24,
+    maxHeight: '90%',
+    paddingBottom: 20,
+  },
+  previewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+  },
+  previewTitle: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1e3a5f',
+    marginLeft: 10,
+  },
+  previewCloseBtn: {
+    padding: 4,
+  },
+  previewScroll: {
+    maxHeight: 400,
+    paddingHorizontal: 16,
+  },
+  previewSection: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  previewSectionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1e5a8e',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+  },
+  previewRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingVertical: 6,
+  },
+  previewLabel: {
+    fontSize: 14,
+    color: '#6b7280',
+    flex: 1,
+  },
+  previewValue: {
+    fontSize: 14,
+    color: '#111',
+    fontWeight: '600',
+    flex: 1.5,
+    textAlign: 'right',
+  },
+  previewPhotoRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  previewPhoto: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+  },
+  previewActions: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    gap: 12,
+  },
+  previewCancelBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: '#f1f5f9',
+  },
+  previewCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  previewConfirmBtn: {
+    flex: 1.5,
+    flexDirection: 'row',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#10b981',
+  },
+  previewConfirmText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
 })

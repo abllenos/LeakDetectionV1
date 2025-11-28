@@ -73,18 +73,8 @@ const SettingsScreen = observer(({ navigation }) => {
   const cancelLogout = () => store.setLogoutModalVisible(false);
 
   const handleClearCache = () => {
-    Alert.alert(
-      'Clear Map Cache',
-      'This will remove all offline map tiles cached on your device. You can re-download them later.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Clear Cache', 
-          style: 'destructive',
-          onPress: () => store.confirmClearCache && store.confirmClearCache()
-        }
-      ]
-    );
+    // Use the store's modal-based clear cache flow
+    store.setClearCacheModalVisible(true);
   };
 
   return (
@@ -142,7 +132,9 @@ const SettingsScreen = observer(({ navigation }) => {
               <View style={styles.progressBarBackground}>
                 <View style={[styles.progressBarFill, { width: `${store.updateProgress}%` }]} />
               </View>
-              <Text style={styles.progressText}>{store.updateProgress}%</Text>
+              <Text style={styles.progressText}>
+                {store.updateProgress}% - {store.cachedTiles.toLocaleString()} tiles ({store.storageUsed} MB)
+              </Text>
               {store.mapsDownloadSpeed > 0 && (
                 <Text style={styles.speedText}>{store.mapsDownloadSpeed} tiles/sec {store.mapsPaused && '(Paused)'}</Text>
               )}
@@ -188,9 +180,32 @@ const SettingsScreen = observer(({ navigation }) => {
             </View>
             <View>
               <Text style={styles.smallLabel}>Status:</Text>
-              <Text style={styles.valueText}>{store.clientRecordCount > 0 ? 'Downloaded' : 'Not Available'}</Text>
+              <Text style={[styles.valueText, store.clientDataIncomplete && { color: '#f59e0b' }]}>
+                {store.clientDataIncomplete ? 'Incomplete' : (store.clientRecordCount > 0 ? 'Downloaded' : 'Not Available')}
+              </Text>
             </View>
           </View>
+
+          {/* Warning for incomplete data */}
+          {store.clientDataIncomplete && (
+            <View style={styles.incompleteDataWarning}>
+              <Ionicons name="warning" size={16} color="#f59e0b" />
+              <View style={{ flex: 1, marginLeft: 8 }}>
+                <Text style={styles.incompleteDataTitle}>Data Incomplete</Text>
+                <Text style={styles.incompleteDataText}>
+                  Download was interrupted. Tap below to continue downloading the remaining data.
+                </Text>
+                <TouchableOpacity 
+                  style={styles.redownloadButton}
+                  onPress={() => store.clearAndRedownloadCustomerData()}
+                  disabled={store.clientLoading || store.clientDeleting}
+                >
+                  <Ionicons name="play" size={14} color="#fff" />
+                  <Text style={styles.redownloadButtonText}>Continue Download</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
 
           <TouchableOpacity 
             style={[styles.clearDataButton, store.clientDeleting && styles.clearDataButtonDisabled]} 
@@ -799,6 +814,43 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#78350f',
     lineHeight: 18,
+  },
+  incompleteDataWarning: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#fffbeb',
+    borderLeftWidth: 4,
+    borderLeftColor: '#f59e0b',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 12,
+  },
+  incompleteDataTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#92400e',
+    marginBottom: 4,
+  },
+  incompleteDataText: {
+    fontSize: 12,
+    color: '#78350f',
+    lineHeight: 18,
+  },
+  redownloadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f59e0b',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    marginTop: 8,
+    alignSelf: 'flex-start',
+  },
+  redownloadButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 6,
   },
 });
 

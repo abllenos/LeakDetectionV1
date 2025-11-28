@@ -9,7 +9,7 @@
       "web"
     ],
     "orientation": "portrait",
-  "icon": "./assets/leakdetect.png",
+    "icon": "./assets/leaklogo.png",
     "updates": {
       "enabled": false
     },
@@ -37,7 +37,7 @@
         "WRITE_EXTERNAL_STORAGE"
       ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/leakdetect.png",
+        "foregroundImage": "./assets/leaklogo.png",
         "backgroundColor": "#ffffff"
       },
       "config": {

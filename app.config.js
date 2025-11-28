@@ -2,17 +2,17 @@ export default {
   expo: {
     name: "LeakDetection",
     slug: "leakdetection",
-    version: "1.0.3",
+    version: "1.0.4",
     platforms: ["ios", "android"],
     orientation: "portrait",
-  icon: "./assets/applogoleak.jpeg",
+  icon: "./assets/leaklogo.png",
     updates: {
       url: "https://u.expo.dev/da631ae3-5d6d-4ef3-bc20-498f42ef3993",
     },
     assetBundlePatterns: ["**/*"],
     ios: {
       supportsTablet: true,
-      buildNumber: "6",
+      buildNumber: "7",
       runtimeVersion: {
         policy: "appVersion",
       },
@@ -29,7 +29,7 @@ export default {
     },
     android: {
       package: "com.leakdetection.app",
-      versionCode: 6,
+      versionCode: 7,
       runtimeVersion: "1.0.0",
       permissions: [
         "ACCESS_FINE_LOCATION",
@@ -39,7 +39,7 @@ export default {
         "WRITE_EXTERNAL_STORAGE",
       ],
       adaptiveIcon: {
-        foregroundImage: "./assets/applogoleak.jpeg",
+        foregroundImage: "./assets/leaklogo.png",
         backgroundColor: "#1e5a8e",
       },
       config: {

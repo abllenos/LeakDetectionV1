@@ -6,7 +6,7 @@ import { devApi } from './interceptor';
 import { Platform } from 'react-native';
 
 const LOCATION_TRACKING_TASK = 'background-location-tracking';
-const TRACKING_INTERVAL = 60000; // 60 seconds
+const TRACKING_INTERVAL = 30000; // 30 seconds
 
 let trackingInterval = null;
 

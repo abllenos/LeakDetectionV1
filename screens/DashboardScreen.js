@@ -13,27 +13,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import AppHeader from '../components/AppHeader';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { ActivityIndicator } from 'react-native';
 import { startPeriodicDataCheck, stopPeriodicDataCheck } from '../services/dataChecker';
 import { observer } from 'mobx-react-lite';
-import { useDashboardStore } from '../stores/RootStore';
+import { useDashboardStore, useOfflineStore } from '../stores/RootStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { preCacheCustomers } from '../services/interceptor';
+import { preCacheCustomers, checkCustomerDataIntegrity, resumeCustomerDownload } from '../services/interceptor';
 
 const DashboardScreen = observer(({ navigation }) => {
   const dashboardStore = useDashboardStore();
+  const offlineStore = useOfflineStore();
   const dataCheckIntervalRef = useRef(null);
-  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
-  const [selectedActivity, setSelectedActivity] = useState(null);
-  const [detailsModalVisible, setDetailsModalVisible] = useState(false);
-  
-  // Customer download states
-  const [showDownloadPrompt, setShowDownloadPrompt] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState(0);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [downloadComplete, setDownloadComplete] = useState(false);
-  const [newCustomersAvailable, setNewCustomersAvailable] = useState(0);
 
   useEffect(() => {
     console.log('[Dashboard] Component mounted, loading data...');
@@ -43,14 +34,16 @@ const DashboardScreen = observer(({ navigation }) => {
         // Load user data and reports
         await dashboardStore.loadUserData();
         await dashboardStore.loadLeakReports();
-        setInitialLoadComplete(true);
+        // Check customer data status for offline access
+        await dashboardStore.checkCustomerDataStatus();
+        dashboardStore.setInitialLoadComplete(true);
         console.log('[Dashboard] Initial data load complete');
         
         // Check for new customers after initial load
         checkForNewCustomers();
       } catch (error) {
         console.error('[Dashboard] Error loading initial data:', error);
-        setInitialLoadComplete(true); // Still mark as complete to prevent infinite loading
+        dashboardStore.setInitialLoadComplete(true); // Still mark as complete to prevent infinite loading
       }
     };
     
@@ -63,6 +56,8 @@ const DashboardScreen = observer(({ navigation }) => {
       console.log('[Dashboard] Screen focused, refreshing data...');
       dashboardStore.loadUserData();
       dashboardStore.loadLeakReports();
+      // Re-check customer data status
+      dashboardStore.checkCustomerDataStatus();
       // Also check for new customers when screen is focused
       checkForNewCustomers();
     });
@@ -85,6 +80,7 @@ const DashboardScreen = observer(({ navigation }) => {
       count: dashboardStore.totalReports,
       color: '#2196F3',
       borderColor: '#2196F3',
+      onPress: () => dashboardStore.setAllReportsModalVisible(true),
     },
     {
       id: 3,
@@ -149,6 +145,36 @@ const DashboardScreen = observer(({ navigation }) => {
   // Check for new customers and prompt download
   const checkForNewCustomers = async () => {
     try {
+      // First check data integrity - if incomplete, prompt to continue download
+      const integrityCheck = await checkCustomerDataIntegrity();
+      console.log('[Dashboard] Customer data integrity check:', integrityCheck);
+      
+      if (!integrityCheck.complete && integrityCheck.missingChunks && integrityCheck.missingChunks.length > 0) {
+        console.log(`[Dashboard] ⚠️ Customer data incomplete - ${integrityCheck.loadedRecords || 0} records downloaded`);
+        // Show alert to inform user about incomplete data and offer to continue download
+        Alert.alert(
+          'Customer Data Incomplete',
+          `Download was interrupted. ${integrityCheck.loadedRecords || 0} records downloaded so far. Would you like to continue downloading the remaining data?`,
+          [
+            { 
+              text: 'Later', 
+              style: 'cancel',
+              onPress: () => console.log('[Dashboard] User chose to download later')
+            },
+            { 
+              text: 'Continue Download', 
+              onPress: () => {
+                console.log('[Dashboard] Continuing download of customer data...');
+                // Show download prompt which will trigger resume
+                dashboardStore.setShowDownloadPrompt(true);
+                dashboardStore.setResumeDownload(true);
+              }
+            }
+          ]
+        );
+        return;
+      }
+      
       // Check if download was completed successfully
       const manifest = await AsyncStorage.getItem('allCustomers_manifest');
       const cachedCount = await AsyncStorage.getItem('allCustomers_count');
@@ -163,34 +189,55 @@ const DashboardScreen = observer(({ navigation }) => {
       }
 
       console.log('[Dashboard] No complete customer download found - showing prompt');
-      setShowDownloadPrompt(true);
+      dashboardStore.setShowDownloadPrompt(true);
     } catch (error) {
       console.log('Error checking for new customers:', error);
     }
   };
 
-  // Handle download customers
+  // Handle download customers (supports both fresh download and resume)
   const handleDownloadCustomers = async () => {
     try {
-      setIsDownloading(true);
-      setDownloadProgress(0);
+      dashboardStore.setIsDownloading(true);
+      dashboardStore.setDownloadProgress(0);
+      dashboardStore.setDownloadedRecords(0);
 
-      await preCacheCustomers((progress) => {
-        setDownloadProgress(progress);
-      });
+      // Check if we should resume an incomplete download
+      if (dashboardStore.resumeDownload) {
+        console.log('[Dashboard] Resuming incomplete download...');
+        await resumeCustomerDownload((progress) => {
+          const percentage = typeof progress === 'object' ? progress.percentage : progress;
+          const current = typeof progress === 'object' ? progress.current : 0;
+          dashboardStore.setDownloadProgress(percentage || 0);
+          dashboardStore.setDownloadedRecords(current || 0);
+        });
+        dashboardStore.setResumeDownload(false); // Reset flag
+      } else {
+        // Fresh download
+        await preCacheCustomers((progress) => {
+          const percentage = typeof progress === 'object' ? progress.percentage : progress;
+          const current = typeof progress === 'object' ? progress.current : 0;
+          dashboardStore.setDownloadProgress(percentage || 0);
+          dashboardStore.setDownloadedRecords(current || 0);
+        });
+      }
 
-      setDownloadComplete(true);
-      setIsDownloading(false);
+      dashboardStore.setDownloadComplete(true);
+      dashboardStore.setIsDownloading(false);
+      dashboardStore.setDownloadProgress(100);
       
       setTimeout(() => {
-        setShowDownloadPrompt(false);
-        setDownloadComplete(false);
-        setNewCustomersAvailable(false);
+        dashboardStore.setShowDownloadPrompt(false);
+        dashboardStore.setDownloadComplete(false);
+        dashboardStore.setNewCustomersAvailable(false);
+        dashboardStore.setResumeDownload(false);
+        dashboardStore.setDownloadedRecords(0);
       }, 2000);
     } catch (error) {
       console.log('Error downloading customers:', error);
-      Alert.alert('Download Failed', 'Failed to download customer data. Please try again.');
-      setIsDownloading(false);
+      Alert.alert('Download Failed', error.message || 'Failed to download customer data. Please try again.');
+      dashboardStore.setIsDownloading(false);
+      dashboardStore.setResumeDownload(false);
     }
   };
 
@@ -244,6 +291,35 @@ const DashboardScreen = observer(({ navigation }) => {
     };
   });
 
+  // Transform all reports for the All Reports modal
+  const allReportsData = dashboardStore.allReports.map((report, index) => ({
+    id: report.id || index,
+    title: `${report.refNo || 'N/A'}`,
+    location: report.reportedLocation || 'Unknown location',
+    time: getTimeAgo(report.dtReported),
+    iconName: getLeakTypeIcon(report.dispatchStat),
+    iconFamily: 'Ionicons',
+    iconBg: getLeakTypeColor(report.dispatchStat),
+    meterNumber: report.referenceMtr,
+    dispatchStatus: report.dispatchStat,
+    latitude: report.latitude || report.lat || report.Latitude || report.LAT,
+    longitude: report.longitude || report.lng || report.Longitude || report.LNG,
+    fullReport: report
+  }));
+
+  // Helper to get status text
+  const getStatusText = (status) => {
+    console.log('📊 getStatusText called with:', status, typeof status);
+    switch (status) {
+      case 0: return 'Pending';
+      case 1: return 'Dispatched';
+      case 2: return 'Repaired';
+      case 3: return 'Closed';
+      case 4: return 'Not Found';
+      default: return 'Unknown';
+    }
+  };
+
   const renderIcon = (iconFamily, iconName, size, color) => {
     switch (iconFamily) {
       case 'Ionicons':
@@ -290,6 +366,15 @@ const DashboardScreen = observer(({ navigation }) => {
           </View>
         )}
         
+        {/* Offline Mode Banner - Only shows when offline */}
+        {!offlineStore.isOnline && (
+          <View style={styles.offlineModeBanner}>
+            <Ionicons name="cloud-offline" size={20} color="#dc2626" />
+            <Text style={styles.offlineModeBannerText}>Offline Mode</Text>
+            <Text style={styles.offlineModeBannerSubtext}>Using cached data</Text>
+          </View>
+        )}
+        
         {/* Quick Stats Summary */}
         {!dashboardStore.loadingReports && (
           <>
@@ -319,6 +404,7 @@ const DashboardScreen = observer(({ navigation }) => {
               key={stat.id} 
               style={[styles.statCard, { borderLeftColor: stat.borderColor }]}
               activeOpacity={0.7}
+              onPress={stat.onPress}
             >
               <View style={styles.statLeft}>
                 <View style={[styles.statIconContainer, { backgroundColor: stat.color + '20' }]}>
@@ -355,8 +441,8 @@ const DashboardScreen = observer(({ navigation }) => {
                 style={styles.activityCard}
                 activeOpacity={0.7}
                 onPress={() => {
-                  setSelectedActivity(activity);
-                  setDetailsModalVisible(true);
+                  dashboardStore.setSelectedActivity(activity);
+                  dashboardStore.setDetailsModalVisible(true);
                 }}
               >
                 <View style={[styles.activityIconContainer, { backgroundColor: activity.iconBg + '20' }]}>
@@ -386,8 +472,8 @@ const DashboardScreen = observer(({ navigation }) => {
       <Modal
         animationType="fade"
         transparent={true}
-        visible={showDownloadPrompt}
-        onRequestClose={() => !isDownloading && setShowDownloadPrompt(false)}
+        visible={dashboardStore.showDownloadPrompt}
+        onRequestClose={() => !dashboardStore.isDownloading && dashboardStore.setShowDownloadPrompt(false)}
       >
         <View style={styles.downloadModalOverlay}>
           <View style={styles.downloadModalContainer}>
@@ -395,49 +481,53 @@ const DashboardScreen = observer(({ navigation }) => {
             <View style={styles.downloadModalHeader}>
               <View style={styles.downloadIconContainer}>
                 <Ionicons 
-                  name={downloadComplete ? "checkmark-circle" : "cloud-download"} 
+                  name={dashboardStore.downloadComplete ? "checkmark-circle" : "cloud-download"} 
                   size={48} 
-                  color={downloadComplete ? "#4CAF50" : "#1e5a8e"} 
+                  color={dashboardStore.downloadComplete ? "#4CAF50" : "#1e5a8e"} 
                 />
               </View>
               <Text style={styles.downloadModalTitle}>
-                {downloadComplete ? "Download Complete!" : "New Customer Data Available"}
+                {dashboardStore.downloadComplete ? "Download Complete!" : "New Customer Data Available"}
               </Text>
               <Text style={styles.downloadModalSubtitle}>
-                {downloadComplete 
+                {dashboardStore.downloadComplete 
                   ? "Customer data has been updated successfully"
                   : "Updated customer data is available for download"}
               </Text>
             </View>
 
             {/* Progress Bar */}
-            {isDownloading && (
+            {dashboardStore.isDownloading && (
               <View style={styles.progressContainer}>
                 <View style={styles.progressBar}>
-                  <View style={[styles.progressFill, { width: `${downloadProgress}%` }]} />
+                  <View style={[styles.progressFill, { width: `${dashboardStore.downloadProgress}%` }]} />
                 </View>
-                <Text style={styles.progressText}>{Math.round(downloadProgress)}%</Text>
+                <Text style={styles.progressText}>
+                  {dashboardStore.downloadedRecords > 0 
+                    ? `${dashboardStore.downloadedRecords.toLocaleString()} records`
+                    : 'Starting...'}
+                </Text>
               </View>
             )}
 
             {/* Action Buttons */}
-            {!downloadComplete && (
+            {!dashboardStore.downloadComplete && (
               <View style={styles.downloadModalButtons}>
                 <TouchableOpacity
                   style={[styles.downloadModalButton, styles.downloadCancelButton]}
-                  onPress={() => setShowDownloadPrompt(false)}
-                  disabled={isDownloading}
+                  onPress={() => dashboardStore.setShowDownloadPrompt(false)}
+                  disabled={dashboardStore.isDownloading}
                 >
                   <Text style={styles.downloadCancelButtonText}>
-                    {isDownloading ? "Downloading..." : "Later"}
+                    {dashboardStore.isDownloading ? "Downloading..." : "Later"}
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.downloadModalButton, styles.downloadConfirmButton]}
                   onPress={handleDownloadCustomers}
-                  disabled={isDownloading}
+                  disabled={dashboardStore.isDownloading}
                 >
-                  {isDownloading ? (
+                  {dashboardStore.isDownloading ? (
                     <ActivityIndicator size="small" color="#fff" />
                   ) : (
                     <Text style={styles.downloadConfirmButtonText}>Download Now</Text>
@@ -453,20 +543,20 @@ const DashboardScreen = observer(({ navigation }) => {
       <Modal
         animationType="slide"
         transparent={true}
-        visible={detailsModalVisible}
-        onRequestClose={() => setDetailsModalVisible(false)}
+        visible={dashboardStore.detailsModalVisible}
+        onRequestClose={() => dashboardStore.setDetailsModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.detailsModalContainer}>
             {/* Modal Header */}
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Report Details</Text>
-              <TouchableOpacity onPress={() => setDetailsModalVisible(false)}>
+              <TouchableOpacity onPress={() => dashboardStore.setDetailsModalVisible(false)}>
                 <Ionicons name="close-circle" size={28} color="#64748b" />
               </TouchableOpacity>
             </View>
 
-            {selectedActivity && (
+            {dashboardStore.selectedActivity && (
               <ScrollView style={styles.modalContent}>
                 {/* Reference Number */}
                 <View style={styles.detailRow}>
@@ -475,7 +565,7 @@ const DashboardScreen = observer(({ navigation }) => {
                   </View>
                   <View style={styles.detailTextContainer}>
                     <Text style={styles.detailLabel}>Reference Number</Text>
-                    <Text style={styles.detailValue}>{selectedActivity.title}</Text>
+                    <Text style={styles.detailValue}>{dashboardStore.selectedActivity.title}</Text>
                   </View>
                 </View>
 
@@ -486,19 +576,19 @@ const DashboardScreen = observer(({ navigation }) => {
                   </View>
                   <View style={styles.detailTextContainer}>
                     <Text style={styles.detailLabel}>Location</Text>
-                    <Text style={styles.detailValue}>{selectedActivity.location}</Text>
+                    <Text style={styles.detailValue}>{dashboardStore.selectedActivity.location}</Text>
                   </View>
                 </View>
 
                 {/* Meter Number */}
-                {selectedActivity.meterNumber && (
+                {dashboardStore.selectedActivity.meterNumber && (
                   <View style={styles.detailRow}>
                     <View style={styles.detailIconContainer}>
                       <Ionicons name="speedometer" size={20} color="#1e5a8e" />
                     </View>
                     <View style={styles.detailTextContainer}>
                       <Text style={styles.detailLabel}>Meter Number</Text>
-                      <Text style={styles.detailValue}>{selectedActivity.meterNumber}</Text>
+                      <Text style={styles.detailValue}>{dashboardStore.selectedActivity.meterNumber}</Text>
                     </View>
                   </View>
                 )}
@@ -510,24 +600,24 @@ const DashboardScreen = observer(({ navigation }) => {
                   </View>
                   <View style={styles.detailTextContainer}>
                     <Text style={styles.detailLabel}>Time Reported</Text>
-                    <Text style={styles.detailValue}>{selectedActivity.time}</Text>
+                    <Text style={styles.detailValue}>{dashboardStore.selectedActivity.time}</Text>
                   </View>
                 </View>
 
                 {/* Status */}
                 <View style={styles.detailRow}>
                   <View style={styles.detailIconContainer}>
-                    <Ionicons name={selectedActivity.iconName} size={20} color={selectedActivity.iconBg} />
+                    <Ionicons name={dashboardStore.selectedActivity.iconName} size={20} color={dashboardStore.selectedActivity.iconBg} />
                   </View>
                   <View style={styles.detailTextContainer}>
-                    <Text style={styles.detailLabel}>Dispatch Status</Text>
-                    <View style={[styles.statusBadge, { backgroundColor: selectedActivity.iconBg + '20' }]}>
-                      <Text style={[styles.statusBadgeText, { color: selectedActivity.iconBg }]}>
-                        {selectedActivity.dispatchStatus === 0 ? 'Pending' :
-                         selectedActivity.dispatchStatus === 1 ? 'Dispatched' :
-                         selectedActivity.dispatchStatus === 2 ? 'Repaired' :
-                         selectedActivity.dispatchStatus === 3 ? 'Closed' :
-                         selectedActivity.dispatchStatus === 4 ? 'Not Found' : 'Unknown'}
+                    <Text style={styles.detailLabel}>Status</Text>
+                    <View style={[styles.statusBadge, { backgroundColor: dashboardStore.selectedActivity.iconBg + '20' }]}>
+                      <Text style={[styles.statusBadgeText, { color: dashboardStore.selectedActivity.iconBg }]}>
+                        {dashboardStore.selectedActivity.dispatchStatus === 0 ? 'Pending' :
+                         dashboardStore.selectedActivity.dispatchStatus === 1 ? 'Dispatched' :
+                         dashboardStore.selectedActivity.dispatchStatus === 2 ? 'Repaired' :
+                         dashboardStore.selectedActivity.dispatchStatus === 3 ? 'Closed' :
+                         dashboardStore.selectedActivity.dispatchStatus === 4 ? 'Not Found' : 'Unknown'}
                       </Text>
                     </View>
                   </View>
@@ -538,23 +628,23 @@ const DashboardScreen = observer(({ navigation }) => {
               <TouchableOpacity 
                 style={styles.modalActionButton}
                 onPress={() => {
-                  setDetailsModalVisible(false);
+                  dashboardStore.setDetailsModalVisible(false);
                   
                   // Check if we have direct coordinates
-                  if (selectedActivity.latitude && selectedActivity.longitude) {
+                  if (dashboardStore.selectedActivity.latitude && dashboardStore.selectedActivity.longitude) {
                     navigation.navigate('Report', { 
                       screen: 'ReportMap',
                       params: { 
-                        refNo: selectedActivity.title,
-                        latitude: selectedActivity.latitude,
-                        longitude: selectedActivity.longitude,
-                        location: selectedActivity.location,
-                        meterNumber: selectedActivity.meterNumber
+                        refNo: dashboardStore.selectedActivity.title,
+                        latitude: dashboardStore.selectedActivity.latitude,
+                        longitude: dashboardStore.selectedActivity.longitude,
+                        location: dashboardStore.selectedActivity.location,
+                        meterNumber: dashboardStore.selectedActivity.meterNumber
                       }
                     });
                   } 
                   // Try to get coordinates from meter number if available
-                  else if (selectedActivity.meterNumber) {
+                  else if (dashboardStore.selectedActivity.meterNumber) {
                     Alert.alert(
                       'Searching Location',
                       'Looking up meter coordinates...',
@@ -565,8 +655,8 @@ const DashboardScreen = observer(({ navigation }) => {
                     navigation.navigate('Report', { 
                       screen: 'ReportMap',
                       params: { 
-                        meterNumber: selectedActivity.meterNumber,
-                        refNo: selectedActivity.title
+                        meterNumber: dashboardStore.selectedActivity.meterNumber,
+                        refNo: dashboardStore.selectedActivity.title
                       }
                     });
                   } 
@@ -585,7 +675,7 @@ const DashboardScreen = observer(({ navigation }) => {
 
               <TouchableOpacity 
                 style={[styles.modalActionButton, { backgroundColor: '#64748b' }]}
-                onPress={() => setDetailsModalVisible(false)}
+                onPress={() => dashboardStore.setDetailsModalVisible(false)}
               >
                 <Ionicons name="close" size={20} color="#fff" />
                 <Text style={styles.modalActionText}>Close</Text>
@@ -593,6 +683,86 @@ const DashboardScreen = observer(({ navigation }) => {
                 </View>
               </ScrollView>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* All Reports Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={dashboardStore.allReportsModalVisible}
+        onRequestClose={() => dashboardStore.setAllReportsModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.allReportsModalContainer}>
+            {/* Modal Header */}
+            <View style={styles.allReportsHeader}>
+              <View style={styles.allReportsHeaderLeft}>
+                <View style={styles.allReportsIconContainer}>
+                  <Ionicons name="document-text" size={24} color="#2196F3" />
+                </View>
+                <View>
+                  <Text style={styles.allReportsTitle}>All Leak Reports</Text>
+                  <Text style={styles.allReportsSubtitle}>{dashboardStore.totalReports} total reports</Text>
+                </View>
+              </View>
+              <TouchableOpacity 
+                style={styles.allReportsCloseBtn}
+                onPress={() => dashboardStore.setAllReportsModalVisible(false)}
+              >
+                <Ionicons name="close" size={24} color="#64748b" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Reports List */}
+            <ScrollView 
+              style={styles.allReportsList}
+              showsVerticalScrollIndicator={false}
+            >
+              {allReportsData.length > 0 ? (
+                allReportsData.map((report) => (
+                  <TouchableOpacity 
+                    key={report.id} 
+                    style={styles.allReportsItem}
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      dashboardStore.setAllReportsModalVisible(false);
+                      dashboardStore.setSelectedActivity(report);
+                      dashboardStore.setDetailsModalVisible(true);
+                    }}
+                  >
+                    <View style={[styles.allReportsItemIcon, { backgroundColor: report.iconBg + '20' }]}>
+                      {renderIcon(report.iconFamily, report.iconName, 20, report.iconBg)}
+                    </View>
+                    <View style={styles.allReportsItemContent}>
+                      <View style={styles.allReportsItemHeader}>
+                        <Text style={styles.allReportsItemTitle}>{report.title}</Text>
+                        <View style={[styles.allReportsStatusBadge, { backgroundColor: report.iconBg + '20' }]}>
+                          <Text style={[styles.allReportsStatusText, { color: report.iconBg }]}>
+                            {getStatusText(report.dispatchStatus)}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={styles.allReportsItemLocation} numberOfLines={1}>
+                        {report.location}
+                      </Text>
+                      {report.meterNumber && (
+                        <Text style={styles.allReportsItemMeter}>Meter: {report.meterNumber}</Text>
+                      )}
+                      <Text style={styles.allReportsItemTime}>{report.time}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <View style={styles.allReportsEmpty}>
+                  <Ionicons name="clipboard-outline" size={48} color="#cbd5e1" />
+                  <Text style={styles.allReportsEmptyTitle}>No Reports Found</Text>
+                  <Text style={styles.allReportsEmptyText}>Your leak reports will appear here</Text>
+                </View>
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -673,6 +843,80 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  // Offline Data Banner Styles
+  offlineDataBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 12,
+    padding: 14,
+    borderLeftWidth: 4,
+    borderLeftColor: '#9ca3af',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  offlineDataBannerComplete: {
+    borderLeftColor: '#059669',
+    backgroundColor: '#f0fdf4',
+  },
+  offlineDataBannerNone: {
+    borderLeftColor: '#dc2626',
+    backgroundColor: '#fef2f2',
+  },
+  offlineDataBannerPartial: {
+    borderLeftColor: '#d97706',
+    backgroundColor: '#fffbeb',
+  },
+  offlineDataBannerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  offlineDataBannerText: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  offlineDataBannerTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  offlineDataBannerSubtitle: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 2,
+  },
+  // Offline Mode Banner (shows only when offline)
+  offlineModeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fef2f2',
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#fecaca',
+  },
+  offlineModeBannerText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#dc2626',
+    marginLeft: 8,
+  },
+  offlineModeBannerSubtext: {
+    fontSize: 13,
+    color: '#9ca3af',
+    marginLeft: 8,
   },
   quickStats: {
     flexDirection: 'row',
@@ -1215,6 +1459,139 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '700',
+  },
+  
+  // All Reports Modal Styles
+  allReportsModalContainer: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    height: '85%',
+    paddingBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 12,
+  },
+  allReportsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+  },
+  allReportsHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  allReportsIconContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#e6f0fb',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  allReportsTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1e293b',
+  },
+  allReportsSubtitle: {
+    fontSize: 13,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  allReportsCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#f1f5f9',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  allReportsList: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
+  allReportsItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    padding: 14,
+    borderRadius: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  allReportsItemIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  allReportsItemContent: {
+    flex: 1,
+  },
+  allReportsItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  allReportsItemTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1e3a5f',
+  },
+  allReportsStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  allReportsStatusText: {
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  allReportsItemLocation: {
+    fontSize: 13,
+    color: '#64748b',
+    marginBottom: 2,
+  },
+  allReportsItemMeter: {
+    fontSize: 12,
+    color: '#94a3b8',
+    marginBottom: 2,
+  },
+  allReportsItemTime: {
+    fontSize: 11,
+    color: '#9aa5b1',
+    fontWeight: '500',
+  },
+  allReportsEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  allReportsEmptyTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#334155',
+    marginTop: 16,
+    marginBottom: 6,
+  },
+  allReportsEmptyText: {
+    fontSize: 14,
+    color: '#94a3b8',
   },
   
   // bottom navigation styles removed - handled by Tab Navigator

@@ -13,6 +13,7 @@ export class ReportMapStore {
     longitudeDelta: 0.05,
   };
   marker = { latitude: 7.0731, longitude: 125.6129 };
+  userGpsLocation = { latitude: 7.0731, longitude: 125.6129 }; // Actual GPS location (never changes unless GPS updates)
   coordsLabel = '7.073100, 125.612900';
 
   // Search state
@@ -39,6 +40,7 @@ export class ReportMapStore {
       tileIndex: observable,
       region: observable,
       marker: observable,
+      userGpsLocation: observable,
       coordsLabel: observable,
       meterNumber: observable,
       searching: observable,
@@ -57,6 +59,7 @@ export class ReportMapStore {
       setTileIndex: action,
       setRegion: action,
       setMarker: action,
+      setUserGpsLocation: action,
       setCoordsLabel: action,
       setMeterNumber: action,
       setSearching: action,
@@ -95,6 +98,10 @@ export class ReportMapStore {
 
   setMarker(value) {
     this.marker = value;
+  }
+
+  setUserGpsLocation(value) {
+    this.userGpsLocation = value;
   }
 
   setCoordsLabel(value) {
@@ -166,7 +173,26 @@ export class ReportMapStore {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({});
+        // First, try to get last known location for instant display
+        const lastKnown = await Location.getLastKnownPositionAsync();
+        if (lastKnown) {
+          const quickRegion = {
+            latitude: lastKnown.coords.latitude,
+            longitude: lastKnown.coords.longitude,
+            latitudeDelta: 0.02,
+            longitudeDelta: 0.02,
+          };
+          this.region = quickRegion;
+          this.marker = { latitude: quickRegion.latitude, longitude: quickRegion.longitude };
+          this.userGpsLocation = { latitude: quickRegion.latitude, longitude: quickRegion.longitude };
+          this.coordsLabel = `${quickRegion.latitude.toFixed(6)}, ${quickRegion.longitude.toFixed(6)}`;
+        }
+        
+        // Then get precise current location
+        const loc = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.BestForNavigation,
+          maximumAge: 5000, // Accept cached location up to 5 seconds old
+        });
         const nextRegion = {
           latitude: loc.coords.latitude,
           longitude: loc.coords.longitude,
@@ -175,6 +201,7 @@ export class ReportMapStore {
         };
         this.region = nextRegion;
         this.marker = { latitude: nextRegion.latitude, longitude: nextRegion.longitude };
+        this.userGpsLocation = { latitude: nextRegion.latitude, longitude: nextRegion.longitude };
         this.coordsLabel = `${nextRegion.latitude.toFixed(6)}, ${nextRegion.longitude.toFixed(6)}`;
         return nextRegion;
       }
@@ -186,7 +213,11 @@ export class ReportMapStore {
 
   async locateMe() {
     try {
-      const loc = await Location.getCurrentPositionAsync({});
+      // Use high accuracy for faster and more precise location
+      const loc = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.BestForNavigation,
+        maximumAge: 5000, // Accept cached location up to 5 seconds old
+      });
       const nextRegion = {
         latitude: loc.coords.latitude,
         longitude: loc.coords.longitude,
@@ -195,6 +226,7 @@ export class ReportMapStore {
       };
       this.region = nextRegion;
       this.marker = { latitude: nextRegion.latitude, longitude: nextRegion.longitude };
+      this.userGpsLocation = { latitude: nextRegion.latitude, longitude: nextRegion.longitude };
       this.coordsLabel = `${nextRegion.latitude.toFixed(6)}, ${nextRegion.longitude.toFixed(6)}`;
       return nextRegion;
     } catch (error) {
@@ -222,14 +254,28 @@ export class ReportMapStore {
       const response = await searchAccountOrMeter(this.meterNumber.trim());
       const data = response?.data || response?.data?.data || response;
       const results = Array.isArray(data) ? data : data ? [data] : [];
+      const isOffline = response?.offline === true;
       
       if (results.length > 0) {
         const normalized = results.map(this.normalizeMeterResult);
         this.searchResults = normalized;
         this.showSearchResults = true;
+        
+        // Show offline indicator if using offline data
+        if (isOffline) {
+          console.log('📴 Search results from offline data');
+        }
+        
         return normalized;
       } else {
-        Alert.alert('No Results', 'No meter or account found matching your search.');
+        if (isOffline) {
+          Alert.alert(
+            'No Offline Results', 
+            'No meter or account found in downloaded offline data. Make sure customer data has been downloaded.'
+          );
+        } else {
+          Alert.alert('No Results', 'No meter or account found matching your search.');
+        }
         return [];
       }
     } catch (error) {
@@ -238,7 +284,11 @@ export class ReportMapStore {
       } else {
         console.error('Search error:', error);
         let errorMessage = 'Failed to search meter. Please try again.';
-        if (error.response?.status === 404) {
+        
+        // Check if it's a network error
+        if (error.message?.includes('Network') || error.message?.includes('network') || !error.response) {
+          errorMessage = 'No internet connection. Please download customer data for offline search.';
+        } else if (error.response?.status === 404) {
           errorMessage = 'Search endpoint not found. The API may have changed or is unavailable.';
         } else if (error.response?.data?.message) {
           errorMessage = error.response.data.message;
@@ -427,6 +477,7 @@ export class ReportMapStore {
       longitudeDelta: 0.05,
     };
     this.marker = { latitude: 7.0731, longitude: 125.6129 };
+    this.userGpsLocation = { latitude: 7.0731, longitude: 125.6129 };
     this.coordsLabel = '7.073100, 125.612900';
     this.meterNumber = '';
     this.searching = false;

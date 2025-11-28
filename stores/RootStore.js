@@ -8,6 +8,7 @@ import NearestMetersStore from './NearestMetersStore';
 import { ReportMapStore } from './ReportMapStore';
 import { SettingsStore } from './SettingsStore';
 import OfflineStore from './OfflineStore';
+import DraftsStore from './DraftsStore';
 
 class RootStore {
   constructor() {
@@ -20,6 +21,7 @@ class RootStore {
     this.reportMapStore = new ReportMapStore();
     this.settingsStore = new SettingsStore();
     this.offlineStore = new OfflineStore();
+    this.draftsStore = new DraftsStore();
   }
 
   reset() {
@@ -32,6 +34,7 @@ class RootStore {
     this.reportMapStore.reset();
     this.settingsStore.reset();
     // Don't reset offline store to preserve queue
+    // Don't reset drafts store to preserve drafts
   }
 }
 
@@ -60,6 +63,7 @@ export const useNearestMetersStore = () => useStores().nearestMetersStore;
 export const useReportMapStore = () => useStores().reportMapStore;
 export const useSettingsStore = () => useStores().settingsStore;
 export const useOfflineStore = () => useStores().offlineStore;
+export const useDraftsStore = () => useStores().draftsStore;
 
 export { StoreContext, rootStore };
 export default RootStore;

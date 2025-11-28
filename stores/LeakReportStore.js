@@ -20,6 +20,11 @@ class LeakReportStore {
   flagProjectLeak = null;
   featuredId = '';
 
+  // Leak location fields (where the actual leak is, may differ from meter location)
+  leakLatitude = null;
+  leakLongitude = null;
+  leakLocationMethod = null; // 'current' | 'dragPin' | null (same as meter)
+
   // UI state
   showDmaModal = false;
   dmaOptions = [];
@@ -45,6 +50,9 @@ class LeakReportStore {
       dma: observable,
       flagProjectLeak: observable,
       featuredId: observable,
+      leakLatitude: observable,
+      leakLongitude: observable,
+      leakLocationMethod: observable,
       showDmaModal: observable,
       dmaOptions: observable,
       dmaLoading: observable,
@@ -69,6 +77,8 @@ class LeakReportStore {
       setDma: action.bound,
       setFlagProjectLeak: action.bound,
       setFeaturedId: action.bound,
+      setLeakLocation: action.bound,
+      clearLeakLocation: action.bound,
       setShowDmaModal: action.bound,
       setCoveringExpanded: action.bound,
       setCauseExpanded: action.bound,
@@ -101,6 +111,20 @@ class LeakReportStore {
   setShowDmaModal(v) { this.showDmaModal = v; }
   setCoveringExpanded(v) { this.coveringExpanded = v; }
   setCauseExpanded(v) { this.causeExpanded = v; }
+  
+  // Leak location setters (where the actual leak is)
+  setLeakLocation(lat, lng, method) {
+    console.log('🔴 LeakReportStore.setLeakLocation called with:', lat, lng, method);
+    this.leakLatitude = lat;
+    this.leakLongitude = lng;
+    this.leakLocationMethod = method; // 'current' or 'dragPin'
+    console.log('🔴 LeakReportStore after set - leakLatitude:', this.leakLatitude, 'leakLongitude:', this.leakLongitude);
+  }
+  clearLeakLocation() {
+    this.leakLatitude = null;
+    this.leakLongitude = null;
+    this.leakLocationMethod = null;
+  }
 
   reset() {
     this.leakType = '';
@@ -117,6 +141,9 @@ class LeakReportStore {
     this.dma = '';
     this.flagProjectLeak = null;
     this.featuredId = '';
+    this.leakLatitude = null;
+    this.leakLongitude = null;
+    this.leakLocationMethod = null;
     this.showDmaModal = false;
     this.dmaOptions = [];
     this.dmaLoading = false;

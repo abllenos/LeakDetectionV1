@@ -3,12 +3,17 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { preCacheCustomers } from '../services/interceptor';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIsFocused } from '@react-navigation/native';
 import { observer } from 'mobx-react-lite';
 import { useDownloadStore, useOfflineStore } from '../stores/RootStore';
 import { hasOfflineTiles } from '../services/offlineTileManager';
+import { 
+  startCustomerDownload, 
+  isDownloadInProgress, 
+  setProgressCallback, 
+  setCompletionCallback 
+} from '../services/downloadService';
 
 const AppHeader = observer(({ left, title, subtitle, right, showDownload = true }) => {
   const downloadStore = useDownloadStore();
@@ -50,6 +55,30 @@ const AppHeader = observer(({ left, title, subtitle, right, showDownload = true 
     return () => { mounted = false; clearInterval(iv); };
   }, [isFocused]);
 
+  // Set up callbacks for the download service when component mounts
+  useEffect(() => {
+    // Set progress callback
+    setProgressCallback((percent) => {
+      downloadStore.updateProgress(percent);
+    });
+
+    // Set completion callback
+    setCompletionCallback((result) => {
+      if (result.success) {
+        downloadStore.completeDownload(result.message);
+        timeoutRef.current = setTimeout(() => downloadStore.clearStatusMsg(), 3000);
+      } else {
+        downloadStore.failDownload(result.message);
+        timeoutRef.current = setTimeout(() => downloadStore.clearStatusMsg(), 4000);
+      }
+    });
+
+    // Check if download is already in progress (from another screen)
+    if (isDownloadInProgress() && !downloadStore.downloading) {
+      downloadStore.startDownload('Downloading client data...');
+    }
+  }, []);
+
   useEffect(() => {
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
@@ -57,7 +86,12 @@ const AppHeader = observer(({ left, title, subtitle, right, showDownload = true 
   }, []);
 
   const startDownload = async () => {
-    if (downloadStore.downloading) return;
+    // Check if already downloading (either in store or in service)
+    if (downloadStore.downloading || isDownloadInProgress()) {
+      console.log('[AppHeader] Download already in progress');
+      return;
+    }
+    
     downloadStore.startDownload('Starting client download...');
 
     try {
@@ -82,21 +116,13 @@ const AppHeader = observer(({ left, title, subtitle, right, showDownload = true 
 
       const opts = mapPreset(preset);
 
-      await preCacheCustomers((p) => {
-        if (typeof p === 'number') {
-          downloadStore.updateProgress(Math.round(p));
-        } else if (p && typeof p === 'object') {
-          if (p.percent != null) downloadStore.updateProgress(Math.round(p.percent));
-          else if (p.done != null && p.total != null) downloadStore.updateProgress(Math.round((p.done / p.total) * 100));
-        }
-      }, opts);
-
-      downloadStore.completeDownload('Client data ready');
-      timeoutRef.current = setTimeout(() => downloadStore.clearStatusMsg(), 3000);
+      // Use the download service - this runs independently of component lifecycle
+      await startCustomerDownload(opts);
+      
+      // Note: completion is handled by the callback set in useEffect
     } catch (err) {
       console.warn('Background download failed', err);
-      downloadStore.failDownload('Client download failed');
-      timeoutRef.current = setTimeout(() => downloadStore.clearStatusMsg(), 4000);
+      // Error handling is done by the callback
     }
   };
 
