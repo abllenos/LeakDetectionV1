@@ -7,7 +7,7 @@ export default {
     orientation: "portrait",
   icon: "./assets/leaklogo.png",
     updates: {
-      url: "https://u.expo.dev/71802a68-9117-40a6-ad7f-486ec32822ab",
+      enabled: false,
     },
     assetBundlePatterns: ["**/*"],
     ios: {
