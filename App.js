@@ -11,6 +11,7 @@ import AppNavigator from './navigation/AppNavigator';
 import { StoreContext, rootStore } from './stores/RootStore';
 import { stopLocationTracking } from './services/locationTracker';
 import { initAutoLogout, stopAutoLogout, recordActivity } from './services/autoLogout';
+import updateChecker from './services/updateChecker';
 
 // Suppress known MobX-React Navigation compatibility warnings
 LogBox.ignoreLogs([
@@ -80,7 +81,7 @@ export default function App() {
   const [isRestarting, setIsRestarting] = useState(false);
   
   useEffect(() => {
-    // Check for EAS Updates
+    // Check for EAS Updates (OTA updates)
     const checkForUpdates = async () => {
       if (__DEV__) {
         console.log('[EAS Update] Skipping update check in development mode');
@@ -97,9 +98,20 @@ export default function App() {
           setUpdateModalVisible(true);
         } else {
           console.log('[EAS Update] App is up to date');
+          
+          // If no OTA update, check Play Store for new version
+          console.log('[Play Store] Checking for Play Store updates...');
+          await updateChecker.checkForUpdate(false, true);
         }
       } catch (error) {
         console.error('[EAS Update] Error checking for updates:', error);
+        
+        // Still check Play Store even if EAS check fails
+        try {
+          await updateChecker.checkForUpdate(false, true);
+        } catch (e) {
+          console.log('[Play Store] Update check failed:', e);
+        }
       }
     };
 

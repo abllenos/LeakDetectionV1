@@ -18,6 +18,7 @@ import { API_BASE } from '../services/interceptor';
 import { logout, preCacheCustomers, getAvailableCustomers } from '../services/interceptor';
 import { stopLocationTracking } from '../services/locationTracker';
 import { forceCheckNewData } from '../services/dataChecker';
+import updateChecker from '../services/updateChecker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { observer } from 'mobx-react-lite';
 import { useSettingsStore, useOfflineStore } from '../stores/RootStore';
@@ -360,6 +361,25 @@ const SettingsScreen = observer(({ navigation }) => {
             <Text style={styles.metaLabel}>Last Updated</Text>
             <Text style={styles.metaValue}>{new Date().toLocaleDateString()}</Text>
           </View>
+          
+          {/* Check for Updates Button */}
+          <TouchableOpacity
+            style={[styles.outlineBtn, { marginTop: 15, borderColor: '#3b82f6' }]}
+            onPress={async () => {
+              try {
+                Alert.alert('Checking...', 'Looking for updates...');
+                const result = await updateChecker.checkForUpdate(true, false);
+                if (!result.updateAvailable && !result.error) {
+                  // Already shown by updateChecker
+                }
+              } catch (error) {
+                Alert.alert('Error', 'Could not check for updates. Please try again later.');
+              }
+            }}
+          >
+            <Ionicons name="refresh-outline" size={18} color="#3b82f6" style={{ marginRight: 6 }} />
+            <Text style={[styles.outlineBtnText, { color: '#3b82f6' }]}>Check for Updates</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Logout Button */}
