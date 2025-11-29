@@ -7,7 +7,7 @@ export default {
     orientation: "portrait",
   icon: "./assets/leaklogo.png",
     updates: {
-      url: "https://u.expo.dev/da631ae3-5d6d-4ef3-bc20-498f42ef3993",
+      url: "https://u.expo.dev/71802a68-9117-40a6-ad7f-486ec32822ab",
     },
     assetBundlePatterns: ["**/*"],
     ios: {
@@ -50,9 +50,10 @@ export default {
     },
     extra: {
       eas: {
-        projectId: "da631ae3-5d6d-4ef3-bc20-498f42ef3993",
+        projectId: "71802a68-9117-40a6-ad7f-486ec32822ab",
       },
     },
+    owner: "bogarttt",
     plugins: [
       [
         "expo-location",

@@ -2,6 +2,7 @@
   "expo": {
     "name": "LeakDetection",
     "slug": "leakdetection",
+    "owner": "kael0",
     "version": "2.0.0",
     "platforms": [
       "ios",
