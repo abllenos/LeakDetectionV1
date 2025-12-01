@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Image, StyleSheet, Dimensions, Animated, ActivityIndicator } from 'react-native';
+import { View, Text, Image, Dimensions, Animated, ActivityIndicator } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import Constants from 'expo-constants';
+import VersionCheck from 'react-native-version-check';
 import { observer } from 'mobx-react-lite';
 import { useAuthStore } from '../stores/RootStore';
 import { startLocationTracking } from '../services/locationTracker';
 import { verifyLocationAccess, showLocationErrorAlert, getAllowedAreaName } from '../services/locationGuard';
+import styles from '../styles/SplashStyles';
 
 const { width, height } = Dimensions.get('window');
 const AnimatedPath = Animated.createAnimatedComponent(Path);
@@ -14,6 +16,8 @@ const SplashScreen = observer(({ navigation }) => {
   const authStore = useAuthStore();
   const [locationStatus, setLocationStatus] = useState('checking'); // 'checking', 'allowed', 'denied'
   const [statusMessage, setStatusMessage] = useState('Verifying location...');
+  const [appVersion, setAppVersion] = useState('');
+  const [buildNumber, setBuildNumber] = useState('');
   const wave1Anim = useRef(new Animated.Value(0)).current;
   const wave2Anim = useRef(new Animated.Value(0)).current;
   const wave3Anim = useRef(new Animated.Value(0)).current;
@@ -77,6 +81,18 @@ const SplashScreen = observer(({ navigation }) => {
       }, 2000);
     }
   };
+
+  // Get app version on mount
+  useEffect(() => {
+    try {
+      const version = VersionCheck.getCurrentVersion();
+      const build = VersionCheck.getCurrentBuildNumber();
+      setAppVersion(version || '');
+      setBuildNumber(build || '');
+    } catch (error) {
+      console.log('Error getting version:', error);
+    }
+  }, []);
 
   useEffect(() => {
     // Start location and auth check
@@ -193,8 +209,8 @@ const SplashScreen = observer(({ navigation }) => {
       <View style={styles.footer}>
         <Text style={styles.footerText}>© DAVAO CITY WATER DISTRICT 2025</Text>
         <Text style={styles.versionText}>
-          ver. {Constants.expoConfig?.version || '2.0.0'}
-          {(Constants.expoConfig?.android?.versionCode || Constants.expoConfig?.ios?.buildNumber) ? ` (b.${Constants.expoConfig?.android?.versionCode || Constants.expoConfig?.ios?.buildNumber})` : ''}
+          ver. {appVersion || Constants.expoConfig?.version || '1.0.0'}
+          {buildNumber ? ` (b.${buildNumber})` : ''}
         </Text>
       </View>
     </View>
@@ -202,83 +218,3 @@ const SplashScreen = observer(({ navigation }) => {
 });
 
 export default SplashScreen;
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-    justifyContent: 'center',
-  },
-  content: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 0,
-    paddingBottom: 0,
-    marginBottom: 80, // add space above the wave
-  },
-  logo: {
-    width: 150,
-    height: 150,
-    marginBottom: 30,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1e3a5f',
-    textAlign: 'center',
-    letterSpacing: 1,
-  },
-  statusContainer: {
-    marginTop: 30,
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  statusIcon: {
-    fontSize: 24,
-    color: '#10b981',
-    marginBottom: 8,
-  },
-  statusText: {
-    fontSize: 14,
-    color: '#64748b',
-    textAlign: 'center',
-  },
-  waveContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 200,
-    overflow: 'hidden',
-    zIndex: 1,
-  },
-  waveLayer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    width: '100%',
-    height: 200,
-  },
-  wave: {
-    position: 'absolute',
-    bottom: 0,
-  },
-  footer: {
-    position: 'absolute',
-    bottom: 20,
-    width: '100%',
-    alignItems: 'center',
-    zIndex: 10,
-  },
-  footerText: {
-    fontSize: 12,
-    color: '#1e3a5f',
-    fontWeight: '600',
-  },
-  versionText: {
-    fontSize: 10,
-    color: '#666',
-    marginTop: 2,
-  },
-});

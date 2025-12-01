@@ -1,0 +1,105 @@
+import { StyleSheet } from 'react-native';
+
+export const nearestMetersStyles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#f0f4f8' },
+  map: { ...StyleSheet.absoluteFillObject },
+  headerContainer: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    paddingTop: 50,
+  },
+  backBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  headerTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  headerSubtitle: { color: 'rgba(255,255,255,0.9)', fontSize: 12, marginTop: 2 },
+  markerContainer: { 
+    width: 40,
+    height: 50,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  markerBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  // markerPulse removed: using SVG marker instead
+  // markerNumber removed (SVG dot now used)
+  panel: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 18,
+    maxHeight: '42%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 12,
+  },
+  panelTitle: { fontSize: 18, fontWeight: '700', color: '#0f172a', marginBottom: 6 },
+  panelSubtitle: { 
+    fontSize: 13, 
+    color: '#64748b', 
+    marginBottom: 16, 
+    lineHeight: 18 
+  },
+  meterItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: '#f8fafc',
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  meterLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  badge: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeNumber: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  meterId: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
+  meterAddress: { fontSize: 13, color: '#64748b', marginTop: 2 },
+  meterDistance: { fontSize: 12, color: '#94a3b8', marginTop: 1 },
+  panelList: {
+    // Limit height so map remains visible
+    maxHeight: 220,
+  },
+  panelListContent: {
+    paddingBottom: 8,
+  },
+});
+
+export default nearestMetersStyles;

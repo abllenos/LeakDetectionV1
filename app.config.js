@@ -2,7 +2,7 @@ export default {
   expo: {
     name: "LeakDetection",
     slug: "leakdetection",
-    version: "1.0.4",
+    version: "1.0.7",
     platforms: ["ios", "android"],
     orientation: "portrait",
   icon: "./assets/leaklogo.png",
@@ -12,7 +12,7 @@ export default {
     assetBundlePatterns: ["**/*"],
     ios: {
       supportsTablet: true,
-      buildNumber: "7",
+      buildNumber: "11",
       runtimeVersion: {
         policy: "appVersion",
       },
@@ -29,7 +29,7 @@ export default {
     },
     android: {
       package: "com.leakdetection.app",
-      versionCode: 7,
+      versionCode: 11,
       runtimeVersion: "1.0.0",
       permissions: [
         "ACCESS_FINE_LOCATION",

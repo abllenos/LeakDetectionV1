@@ -1,9 +1,11 @@
 import 'react-native-gesture-handler';
-import React, { useEffect, useRef } from 'react';
-import { LogBox } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { LogBox, Modal, View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { enableScreens } from 'react-native-screens';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { configure } from 'mobx';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import AppNavigator from './navigation/AppNavigator';
 import { StoreContext, rootStore } from './stores/RootStore';
 import { stopLocationTracking } from './services/locationTracker';
@@ -74,6 +76,8 @@ enableScreens();
 
 export default function App() {
   const navigationRef = useRef(null);
+  const [updateModalVisible, setUpdateModalVisible] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState({ currentVersion: '', latestVersion: '' });
   
   useEffect(() => {
     // Check for Play Store updates on app start
@@ -85,7 +89,15 @@ export default function App() {
 
       try {
         console.log('[Play Store] Checking for updates...');
-        await updateChecker.checkForUpdate(false, true);
+        const result = await updateChecker.checkForUpdate(false, true);
+        
+        if (result.updateAvailable && !result.isDismissed) {
+          setUpdateInfo({
+            currentVersion: result.currentVersion,
+            latestVersion: result.latestVersion,
+          });
+          setUpdateModalVisible(true);
+        }
       } catch (error) {
         console.log('[Play Store] Update check failed:', error);
       }
@@ -179,7 +191,195 @@ export default function App() {
     <StoreContext.Provider value={rootStore}>
       <SafeAreaProvider>
         <AppNavigator navigationRef={navigationRef} />
+        
+        {/* Update Available Modal */}
+        <Modal
+          animationType="fade"
+          transparent={true}
+          visible={updateModalVisible}
+          onRequestClose={() => setUpdateModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContainer}>
+              {/* Icon */}
+              <View style={styles.iconContainer}>
+                <LinearGradient
+                  colors={['#10b981', '#059669']}
+                  style={styles.iconGradient}
+                >
+                  <Ionicons name="arrow-up-circle" size={48} color="#fff" />
+                </LinearGradient>
+              </View>
+
+              {/* Title */}
+              <Text style={styles.modalTitle}>Update Available!</Text>
+
+              {/* Version Info */}
+              <View style={styles.versionContainer}>
+                <View style={styles.versionRow}>
+                  <Text style={styles.versionLabel}>Current Version:</Text>
+                  <Text style={styles.versionValue}>{updateInfo.currentVersion}</Text>
+                </View>
+                <View style={styles.versionRow}>
+                  <Text style={styles.versionLabel}>New Version:</Text>
+                  <Text style={[styles.versionValue, { color: '#10b981', fontWeight: '700' }]}>
+                    {updateInfo.latestVersion}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Message */}
+              <Text style={styles.modalMessage}>
+                A new version of LeakDetection is available with bug fixes and improvements. Update now for the best experience!
+              </Text>
+
+              {/* Buttons */}
+              <View style={styles.buttonContainer}>
+                <TouchableOpacity
+                  style={styles.laterButton}
+                  onPress={() => {
+                    updateChecker.dismissVersion(updateInfo.latestVersion);
+                    setUpdateModalVisible(false);
+                  }}
+                >
+                  <Text style={styles.laterButtonText}>Later</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.updateButton}
+                  onPress={() => {
+                    updateChecker.openStore();
+                    setUpdateModalVisible(false);
+                  }}
+                >
+                  <LinearGradient
+                    colors={['#10b981', '#059669']}
+                    style={styles.updateButtonGradient}
+                  >
+                    <Ionicons name="download-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+                    <Text style={styles.updateButtonText}>Update Now</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaProvider>
     </StoreContext.Provider>
   );
 }
+
+const styles = StyleSheet.create({
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 28,
+    width: '100%',
+    maxWidth: 400,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+  iconContainer: {
+    marginBottom: 20,
+  },
+  iconGradient: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 5,
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#1e293b',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  versionContainer: {
+    backgroundColor: '#f1f5f9',
+    borderRadius: 12,
+    padding: 16,
+    width: '100%',
+    marginBottom: 16,
+  },
+  versionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  versionLabel: {
+    fontSize: 14,
+    color: '#64748b',
+  },
+  versionValue: {
+    fontSize: 14,
+    color: '#1e293b',
+    fontWeight: '600',
+  },
+  modalMessage: {
+    fontSize: 15,
+    color: '#64748b',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  laterButton: {
+    flex: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  laterButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  updateButton: {
+    flex: 1.5,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  updateButtonGradient: {
+    flexDirection: 'row',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  updateButtonText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
+});
