@@ -2,16 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { WebView } from 'react-native-webview';
 import { View, ActivityIndicator, Text } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
+import MapStore from '../stores/MapStore';
+
+const OFFLINE_MAP_KEY = '@offline_map_enabled';
 
 /**
  * Leaflet Map Component using WebView
  * Works reliably in standalone APK builds with OpenStreetMap tiles
- * Supports offline mode with cached tiles
+ * Supports offline mode with cached tiles from MapStore
+ * Respects user's offline mode preference even when online
  */
-const LeafletMap = ({ 
-  latitude = 7.0731, 
-  longitude = 125.6128, 
+const LeafletMap = ({
+  latitude = 7.0731,
+  longitude = 125.6128,
   zoom = 17,
   initialCenter = null,
   initialZoom = null,
@@ -21,43 +26,49 @@ const LeafletMap = ({
   userLocation = null, // Pass user location from React Native
   onMarkerPress,
   onMapPress,
+  tileUrl = null, // Allow custom tile URL to be passed
   style
 }) => {
   const [isOnline, setIsOnline] = useState(true);
-  const [hasOfflineTiles, setHasOfflineTiles] = useState(false);
+  const [useOfflineMap, setUseOfflineMap] = useState(false);
   const [isReady, setIsReady] = useState(false);
-  
-  // Check network status and offline tile availability
+
+  // Check network status and offline map preference
   useEffect(() => {
     let mounted = true;
-    
+
     const checkStatus = async () => {
       try {
         // Check network status
         const netState = await NetInfo.fetch();
         const online = netState.isConnected && netState.isInternetReachable !== false;
-        
-        // Check if offline tiles exist
-        const tileCacheDir = `${FileSystem.cacheDirectory}map_tiles/osm`;
-        const dirInfo = await FileSystem.getInfoAsync(tileCacheDir);
-        
+
+        // Check offline map preference from AsyncStorage
+        const offlineMapPref = await AsyncStorage.getItem(OFFLINE_MAP_KEY);
+        const shouldUseOffline = offlineMapPref === 'true';
+
         if (mounted) {
           setIsOnline(online);
-          setHasOfflineTiles(dirInfo.exists);
+          setUseOfflineMap(shouldUseOffline);
           setIsReady(true);
-          console.log(`[LeafletMap] Network: ${online ? 'Online' : 'Offline'}, Offline tiles: ${dirInfo.exists ? 'Available' : 'Not available'}`);
+
+          console.log(`[LeafletMap] Network: ${online ? 'Online' : 'Offline'}`);
+          console.log(`[LeafletMap] Offline map preference: ${shouldUseOffline ? 'Enabled' : 'Disabled'}`);
+          console.log(`[LeafletMap] MapStore ready: ${MapStore.isReady}`);
+          console.log(`[LeafletMap] MapStore path: ${MapStore.mapTilesPath || 'N/A'}`);
         }
       } catch (error) {
         console.warn('[LeafletMap] Error checking status:', error);
         if (mounted) {
           setIsOnline(true); // Assume online on error
+          setUseOfflineMap(false);
           setIsReady(true);
         }
       }
     };
-    
+
     checkStatus();
-    
+
     // Listen for network changes
     const unsubscribe = NetInfo.addEventListener((state) => {
       const online = state.isConnected && state.isInternetReachable !== false;
@@ -66,26 +77,67 @@ const LeafletMap = ({
         console.log(`[LeafletMap] Network changed: ${online ? 'Online' : 'Offline'}`);
       }
     });
-    
+
+    // Listen for AsyncStorage changes (if preference is updated)
+    const checkInterval = setInterval(async () => {
+      try {
+        const offlineMapPref = await AsyncStorage.getItem(OFFLINE_MAP_KEY);
+        const shouldUseOffline = offlineMapPref === 'true';
+        if (mounted && shouldUseOffline !== useOfflineMap) {
+          setUseOfflineMap(shouldUseOffline);
+          console.log(`[LeafletMap] Offline map preference changed: ${shouldUseOffline ? 'Enabled' : 'Disabled'}`);
+        }
+      } catch (error) {
+        console.warn('[LeafletMap] Error checking preference:', error);
+      }
+    }, 2000); // Check every 2 seconds
+
     return () => {
       mounted = false;
       unsubscribe();
+      clearInterval(checkInterval);
     };
-  }, []);
-  
+  }, [useOfflineMap]);
+
   // Use initialCenter if provided, otherwise use latitude/longitude
   const centerLat = initialCenter ? initialCenter[0] : latitude;
   const centerLng = initialCenter ? initialCenter[1] : longitude;
   const mapZoom = initialZoom || zoom;
-  
+
   // Use passed userLocation or try to get from props
   const userLat = userLocation ? userLocation.latitude : latitude;
   const userLng = userLocation ? userLocation.longitude : longitude;
-  
-  // Determine tile URL based on online/offline status
-  // When offline, the WebView cache will serve previously loaded tiles
-  const tileUrl = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-  
+
+  // Determine tile URL based on offline mode preference and availability
+  const getEffectiveTileUrl = () => {
+    // If custom tileUrl is passed (from ReportScreen), use it
+    if (tileUrl) {
+      console.log('[LeafletMap] Using custom tile URL:', tileUrl);
+      return tileUrl;
+    }
+
+    // If offline mode is enabled AND MapStore has offline tiles ready, use offline tiles
+    if (useOfflineMap && MapStore.isReady && MapStore.mapTilesPath) {
+      // Check if path already starts with file:// or /
+      let offlineTileUrl;
+      if (MapStore.mapTilesPath.startsWith('file://')) {
+        offlineTileUrl = `${MapStore.mapTilesPath}{z}/{x}/{y}.png`;
+      } else {
+        offlineTileUrl = `file://${MapStore.mapTilesPath}{z}/{x}/{y}.png`;
+      }
+      console.log('[LeafletMap] Using offline tiles:', offlineTileUrl);
+      console.log('[LeafletMap] MapStore path:', MapStore.mapTilesPath);
+      return offlineTileUrl;
+    }
+
+    // Default to online tiles
+    console.log('[LeafletMap] Using online tiles');
+    return 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+  };
+
+  const effectiveTileUrl = getEffectiveTileUrl();
+  const isUsingOfflineTiles = effectiveTileUrl.startsWith('file://');
+
   // Show loading state while checking status
   if (!isReady) {
     return (
@@ -95,7 +147,7 @@ const LeafletMap = ({
       </View>
     );
   }
-  
+
   const htmlContent = `
     <!DOCTYPE html>
     <html>
@@ -127,7 +179,7 @@ const LeafletMap = ({
           position: fixed;
           top: 10px;
           right: 10px;
-          background: ${isOnline ? '#10b981' : '#f59e0b'};
+          background: ${isUsingOfflineTiles ? '#7c3aed' : (isOnline ? '#10b981' : '#f59e0b')};
           color: white;
           padding: 6px 12px;
           border-radius: 16px;
@@ -140,34 +192,52 @@ const LeafletMap = ({
           gap: 6px;
         }
         .offline-indicator::before {
-          content: '${isOnline ? '●' : '◐'}';
+          content: '${isUsingOfflineTiles ? '📦' : (isOnline ? '●' : '◐')}';
           font-size: 10px;
         }
       </style>
     </head>
     <body>
       <div id="map"></div>
-      <div class="offline-indicator">${isOnline ? 'Online' : 'Offline Mode'}</div>
+      <div class="offline-indicator">${isUsingOfflineTiles ? 'Offline Map' : (isOnline ? 'Online' : 'Offline Mode')}</div>
       <script>
-        // Initialize map with performance optimizations
-        var map = L.map('map', {
-          zoomControl: true,
-          attributionControl: true,
-          preferCanvas: true,
-          tap: true,
-          tapTolerance: 15,
-          zoomSnap: 0.5,
-          zoomDelta: 0.5,
-          wheelPxPerZoomLevel: 120,
-          bounceAtZoomLimits: false
-        }).setView([${centerLat}, ${centerLng}], ${mapZoom});
+        // Initialize map - default center to GPS location
+        const userLocationCoords = [${userLat}, ${userLng}];
+        const mapCenterCoords = ${initialCenter ? `[${initialCenter[0]}, ${initialCenter[1]}]` : 'userLocationCoords'};
+        const mapZoomLevel = ${initialZoom || 17};
 
-        // Add OpenStreetMap tiles (WebView cache will handle offline access)
-        L.tileLayer('${tileUrl}', {
+        const map = L.map('map', {
+          center: mapCenterCoords,
+          zoom: mapZoomLevel,
+          minZoom: 0,
           maxZoom: 19,
-          attribution: '© OpenStreetMap contributors',
-          crossOrigin: true
-        }).addTo(map);
+          maxNativeZoom: 17,
+          zoomControl: true
+        });
+
+        // Choose tile source based on offline mode - FIXED: Properly quote the URL
+          const tileUrl = '${effectiveTileUrl}';
+          const isOffline = ${isUsingOfflineTiles ? 'true' : 'false'};
+          const isOnline = ${isOnline ? 'true' : 'false'};
+
+        const attribution = '${isUsingOfflineTiles ? 'Davao Roads © DCWD' : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}';
+
+          console.log('Using tile URL:', tileUrl);
+          console.log('Is offline:', isOffline);
+          console.log('Is online:', isOnline);
+
+          // Add tile layer
+          L.tileLayer(tileUrl, {
+            attribution: attribution,
+            maxZoom: 19,
+            maxNativeZoom: 17,
+            tileSize: 256,
+            errorTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+            crossOrigin: true
+          }).addTo(map);
+
+        console.log('🗺️ Map initialized with tiles:', tileUrl);
+        console.log('📦 Using offline tiles:', isOffline);
 
         // Add custom icon function
         function createCustomIcon(label, color) {
@@ -206,13 +276,14 @@ const LeafletMap = ({
           }
         });
 
-        // Always show user location with a blue pulsing marker
+        // Always show user location with person.png icon
         // Add user location marker directly from React Native props
         var userLocationMarker = {
           latitude: ${userLat},
           longitude: ${userLng}
         };
         
+        // User location marker with simple blue pulsing dot
         var userIcon = L.divIcon({
           className: 'user-location-marker',
           html: '<div style="position: relative; width: 32px; height: 32px;">' +
@@ -273,7 +344,7 @@ const LeafletMap = ({
   const handleMessage = (event) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
-      
+
       if (data.type === 'mapPress' && onMapPress) {
         onMapPress({
           latitude: data.latitude,
@@ -283,6 +354,7 @@ const LeafletMap = ({
         onMarkerPress(data.data);
       } else if (data.type === 'mapReady') {
         console.log('[LeafletMap] Map loaded successfully');
+        console.log('[LeafletMap] Mode:', isUsingOfflineTiles ? 'Offline Tiles' : (isOnline ? 'Online' : 'Offline'));
       }
     } catch (error) {
       console.error('[LeafletMap] Error handling message:', error);
@@ -292,27 +364,20 @@ const LeafletMap = ({
   return (
     <View style={[{ flex: 1 }, style]}>
       <WebView
-        originWhitelist={['*']}
-        source={{ html: htmlContent }}
-        onMessage={handleMessage}
+        source={{ html: htmlContent, baseUrl: 'file:///' }}
+        style={{ flex: 1 }}
         javaScriptEnabled={true}
         domStorageEnabled={true}
-        startInLoadingState={true}
-        androidHardwareAccelerationDisabled={false}
-        androidLayerType="hardware"
-        cacheEnabled={true}
-        cacheMode="LOAD_CACHE_ELSE_NETWORK"
-        nestedScrollEnabled={true}
-        scrollEnabled={true}
-        overScrollMode="never"
-        showsVerticalScrollIndicator={false}
-        showsHorizontalScrollIndicator={false}
+        allowFileAccess={true}
+        allowUniversalAccessFromFileURLs={true}
+        allowingReadAccessToURL={'file://'}
+        originWhitelist={['*']}
+        onMessage={handleMessage}
         renderLoading={() => (
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
             <ActivityIndicator size="large" color="#2563eb" />
           </View>
         )}
-        style={{ flex: 1 }}
       />
     </View>
   );

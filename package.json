@@ -1,6 +1,6 @@
 {
   "name": "leakdetection",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "start": "expo start",
@@ -27,8 +27,10 @@
     "expo-image-picker": "~17.0.8",
     "expo-linear-gradient": "~15.0.7",
     "expo-location": "~19.0.7",
+    "expo-notifications": "~0.32.16",
     "expo-task-manager": "~14.0.8",
     "expo-updates": "~29.0.13",
+    "jszip": "^3.10.1",
     "mobx": "^6.13.5",
     "mobx-react-lite": "^4.1.1",
     "react": "19.1.0",

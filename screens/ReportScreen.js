@@ -18,7 +18,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
   const [hasError, setHasError] = React.useState(false);
   const [nearestMeterData, setNearestMeterData] = React.useState(null);
   const [scrollEnabled, setScrollEnabled] = React.useState(true);
-  
+
   // Error boundary effect
   useEffect(() => {
     const errorHandler = (error, isFatal) => {
@@ -27,7 +27,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         setHasError(true);
       }
     };
-    return () => {};
+    return () => { };
   }, []);
 
   if (hasError) {
@@ -38,7 +38,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         <Text style={{ textAlign: 'center', marginTop: 8, color: '#666' }}>
           Please restart the app or contact support if the problem persists.
         </Text>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={{ marginTop: 20, backgroundColor: '#2563eb', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8 }}
           onPress={() => {
             setHasError(false);
@@ -50,7 +50,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
       </View>
     );
   }
-  
+
   const TILE_SOURCES = [
     { name: 'OSM DE', url: 'https://tile.openstreetmap.de/{z}/{x}/{y}.png', attribution: '© OpenStreetMap contributors' },
     { name: 'OSM FR', url: 'https://a.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', attribution: '© OpenStreetMap contributors' },
@@ -61,14 +61,14 @@ const ReportScreenInner = observer(({ navigation, params }) => {
   // Fetch road route using free OSRM routing service
   const fetchRoadRoute = React.useCallback(async (start, end) => {
     if (!start || !end) return;
-    
+
     try {
       // OSRM (Open Source Routing Machine) - completely free, no API key needed
       const url = `https://router.project-osrm.org/route/v1/foot/${start.longitude},${start.latitude};${end.longitude},${end.latitude}?overview=full&geometries=geojson`;
-      
+
       const response = await fetch(url);
       const data = await response.json();
-      
+
       if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
         const route = data.routes[0];
         const coordinates = route.geometry.coordinates.map(coord => ({
@@ -96,7 +96,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
       const timeoutId = setTimeout(() => {
         fetchRoadRoute(toJS(store.userGpsLocation), toJS(store.dragPin));
       }, 500);
-      
+
       return () => clearTimeout(timeoutId);
     }
   }, [store.dragPin?.latitude, store.dragPin?.longitude, fetchRoadRoute]);
@@ -129,7 +129,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
     const incomingLng = params?.longitude;
     const prefilledData = params?.prefilledData;
     const fromNearest = params?.fromNearest;
-    
+
     // Handle incoming from NearestMeters screen with prefilled meter data
     if (fromNearest && prefilledData) {
       console.log('📍 Showing meter from NearestMeters:', prefilledData);
@@ -137,7 +137,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         latitude: parseFloat(prefilledData.latitude),
         longitude: parseFloat(prefilledData.longitude)
       };
-      
+
       // Store meter data in state for later use
       setNearestMeterData({
         meterNumber: incomingMeter,
@@ -147,15 +147,15 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         latitude: reportLocation.latitude,
         longitude: reportLocation.longitude,
       });
-      
+
       // Update store marker to show this location
       store.updateMarkerAndLabel(reportLocation.latitude, reportLocation.longitude);
-      
+
       // Set meter number if provided
       if (incomingMeter) {
         store.setMeterNumber(incomingMeter);
       }
-      
+
       // Animate map to this location
       const nextRegion = {
         latitude: reportLocation.latitude,
@@ -164,7 +164,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         longitudeDelta: 0.005
       };
       mapRef.current?.animateToRegion(nextRegion, 800);
-      
+
       // Clear params to prevent re-triggering
       try {
         navigation.setParams({ fromNearest: null, prefilledData: null });
@@ -176,10 +176,10 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         latitude: parseFloat(incomingLat),
         longitude: parseFloat(incomingLng)
       };
-      
+
       // Update store marker to show this location
       store.updateMarkerAndLabel(reportLocation.latitude, reportLocation.longitude);
-      
+
       // Animate map to this location
       const nextRegion = {
         latitude: reportLocation.latitude,
@@ -188,7 +188,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         longitudeDelta: 0.01
       };
       mapRef.current?.animateToRegion(nextRegion, 800);
-      
+
       // Clear params to prevent re-triggering
       try {
         navigation.setParams({ latitude: null, longitude: null });
@@ -208,8 +208,8 @@ const ReportScreenInner = observer(({ navigation, params }) => {
             const nextRegion = {
               latitude: first.latitude,
               longitude: first.longitude,
-              latitudeDelta: 0.01,
-              longitudeDelta: 0.01
+              latitudeDelta: 0.005,
+              longitudeDelta: 0.005
             };
             mapRef.current?.animateToRegion(nextRegion, 800);
             console.log('✅ Found meter location:', first);
@@ -220,7 +220,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
       }).catch((error) => {
         console.error('❌ Error searching meter:', error);
       });
-      
+
       // Clear param
       try {
         navigation.setParams({ meterNumber: null });
@@ -230,7 +230,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
     else if (incoming) {
       const first = store.handleIncomingSearchResult(incoming, incomingMeter);
       if (first?.latitude && first?.longitude) {
-        const nextRegion = { latitude: first.latitude, longitude: first.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 };
+        const nextRegion = { latitude: first.latitude, longitude: first.longitude, latitudeDelta: 0.005, longitudeDelta: 0.005 };
         mapRef.current?.animateToRegion(nextRegion, 800);
       }
       try { navigation.setParams({ searchResult: null, meterNumber: null }); } catch (e) { /* noop */ }
@@ -241,7 +241,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
   useEffect(() => {
     const useDragPin = params?.useDragPin;
     const useCurrentLocation = params?.useCurrentLocation;
-    
+
     if (useDragPin) {
       // Directly enter drag mode without showing modals
       console.log('Entering drag mode directly from ReportHome');
@@ -277,10 +277,10 @@ const ReportScreenInner = observer(({ navigation, params }) => {
     const fromDraft = params?.fromDraft;
     const draftData = params?.draftData;
     const draftId = params?.draftId;
-    
+
     if (fromDraft && draftData) {
       console.log('📝 Loading draft:', draftId);
-      
+
       // Navigate to form with draft data
       navigation.navigate('LeakReportForm', {
         meterData: draftData.meterData || null,
@@ -290,7 +290,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         draftId: draftId,
         draftData: draftData,
       });
-      
+
       // Clear params
       try { navigation.setParams({ fromDraft: null, draftData: null, draftId: null }); } catch (e) { /* noop */ }
     }
@@ -299,17 +299,17 @@ const ReportScreenInner = observer(({ navigation, params }) => {
   // Handle selectLeakLocation mode - for selecting where the actual leak is (from LeakReportForm)
   const [leakSelectionMode, setLeakSelectionMode] = React.useState(false);
   const [leakSelectionData, setLeakSelectionData] = React.useState(null);
-  
+
   useEffect(() => {
     const selectLeakLocation = params?.selectLeakLocation;
     const meterCoordinates = params?.meterCoordinates;
     const meterDataParam = params?.meterData;
-    
+
     if (selectLeakLocation && meterCoordinates) {
       console.log('🎯 Entering leak location selection mode');
       setLeakSelectionMode(true);
       setLeakSelectionData({ meterCoordinates, meterData: meterDataParam });
-      
+
       // Center map on meter location
       if (meterCoordinates?.latitude && meterCoordinates?.longitude) {
         const nextRegion = {
@@ -319,7 +319,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
           longitudeDelta: 0.003,
         };
         mapRef.current?.animateToRegion(nextRegion, 800);
-        
+
         // Start drag mode with pin at meter location (user will drag to leak location)
         store.setDragMode(true);
         store.setDragPin({
@@ -327,7 +327,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
           longitude: meterCoordinates.longitude,
         });
       }
-      
+
       // Clear params
       try { navigation.setParams({ selectLeakLocation: null, meterCoordinates: null, meterData: null }); } catch (e) { /* noop */ }
     }
@@ -352,9 +352,9 @@ const ReportScreenInner = observer(({ navigation, params }) => {
     // and LeafletMap format (direct latitude/longitude)
     const latitude = e?.nativeEvent?.coordinate?.latitude || e?.latitude;
     const longitude = e?.nativeEvent?.coordinate?.longitude || e?.longitude;
-    
+
     console.log('📍 Map pressed:', { latitude, longitude, dragMode: store.dragMode });
-    
+
     if (latitude && longitude) {
       if (store.dragMode) {
         // In drag mode, update the drag pin location
@@ -386,13 +386,20 @@ const ReportScreenInner = observer(({ navigation, params }) => {
   const selectSearchResult = (result) => {
     const normalized = store.selectSearchResult(result);
     if (normalized?.latitude && normalized?.longitude) {
-      const nextRegion = {
-        latitude: normalized.latitude,
-        longitude: normalized.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      };
-      mapRef.current?.animateToRegion(nextRegion, 800);
+      // Close modal first, then animate
+      store.setShowSearchResults(false);
+      
+      // Use setTimeout to allow modal to close before animating
+      setTimeout(() => {
+        const nextRegion = {
+          latitude: normalized.latitude,
+          longitude: normalized.longitude,
+          latitudeDelta: 0.005,
+          longitudeDelta: 0.005,
+        };
+        console.log('📍 Centering to searched meter:', normalized);
+        mapRef.current?.animateToRegion(nextRegion, 1000);
+      }, 300);
     }
   };
 
@@ -404,11 +411,11 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         Alert.alert('No Location', 'Please drag the pin to where the leak is located.');
         return;
       }
-      
+
       console.log('📍 Returning leak location:', dragCoords);
       console.log('📍 Meter data to restore:', leakSelectionData.meterData);
       console.log('📍 Meter coordinates to restore:', leakSelectionData.meterCoordinates);
-      
+
       // Save data before resetting state
       const savedMeterData = leakSelectionData.meterData;
       const savedMeterCoordinates = leakSelectionData.meterCoordinates;
@@ -416,13 +423,13 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         latitude: dragCoords.latitude,
         longitude: dragCoords.longitude,
       };
-      
+
       // Reset leak selection mode
       setLeakSelectionMode(false);
       setLeakSelectionData(null);
       store.setDragMode(false);
       store.setDragPin(null);
-      
+
       // Use goBack and pass params - this ensures we go back to the SAME screen instance
       // Then immediately set params on that screen
       navigation.navigate({
@@ -438,14 +445,14 @@ const ReportScreenInner = observer(({ navigation, params }) => {
       });
       return;
     }
-    
+
     // If in drag mode with a drag pin, go directly to form with drag pin location
     if (store.dragMode && store.dragPin) {
       const coords = {
         latitude: store.dragPin.latitude,
         longitude: store.dragPin.longitude,
       };
-      
+
       navigation.navigate('LeakReportForm', {
         meterData: { meterNumber: store.meterNumber || '', accountNumber: '', address: '' },
         coordinates: coords,
@@ -453,7 +460,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
       });
       return;
     }
-    
+
     // Check if we have stored meter data from NearestMeters
     if (nearestMeterData) {
       // Directly navigate to leak form with the meter data
@@ -462,12 +469,12 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         accountNumber: nearestMeterData.accountNumber || '',
         address: nearestMeterData.address || '',
       };
-      
+
       const coords = {
         latitude: nearestMeterData.latitude,
         longitude: nearestMeterData.longitude,
       };
-      
+
       navigation.navigate('LeakReportForm', {
         meterData,
         coordinates: coords,
@@ -475,7 +482,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
       });
       return;
     }
-    
+
     // Check if we have meter details from search or confirmUseNearest
     if (store.currentMeterDetails && store.currentMeterDetails.latitude && store.currentMeterDetails.longitude) {
       const meterData = {
@@ -483,19 +490,19 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         accountNumber: store.currentMeterDetails.accountNumber || '',
         address: store.currentMeterDetails.address || '',
       };
-      
+
       const coords = {
         latitude: store.currentMeterDetails.latitude,
         longitude: store.currentMeterDetails.longitude,
       };
-      
+
       navigation.navigate('LeakReportForm', {
         meterData,
         coordinates: coords,
       });
       return;
     }
-    
+
     // No meter data - show source modal
     store.setShowSourceModal(true);
   };
@@ -505,14 +512,14 @@ const ReportScreenInner = observer(({ navigation, params }) => {
     store.setDragMode(false);
     const selectedCoordinates = store.dragPin || store.marker;
     store.setDragPin(null);
-    
+
     // Clear nearest meter data when using current pinpoint
     if (nearestMeterData) {
       setNearestMeterData(null);
       store.setCurrentMeterDetails(null);
       store.setMeterNumber('');
     }
-    
+
     const normalized = store.currentMeterDetails || null;
     const meterData = normalized && (normalized.meterNumber || normalized.accountNumber)
       ? { meterNumber: normalized.meterNumber || '', accountNumber: normalized.accountNumber || '', address: normalized.address || '' }
@@ -599,14 +606,14 @@ const ReportScreenInner = observer(({ navigation, params }) => {
   return (
     <SafeAreaView style={styles.safe} edges={[]}>
       <StatusBar barStyle="light-content" backgroundColor="#1e5a8e" translucent />
-      
+
       {/* Header with Gradient */}
       <LinearGradient
         colors={['#1e5a8e', '#2d7ab8']}
         style={styles.header}
       >
-        <TouchableOpacity 
-          onPress={() => navigation.navigate('ReportHome')} 
+        <TouchableOpacity
+          onPress={() => navigation.navigate('ReportHome')}
           style={styles.backButton}
         >
           <Ionicons name="arrow-back" size={24} color="#fff" />
@@ -619,7 +626,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         </View>
       </LinearGradient>
 
-      <ScrollView 
+      <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
@@ -629,294 +636,294 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         {/* Search bar */}
         <View style={styles.searchRow}>
           <View style={styles.searchInputWrap}>
-          <Ionicons name="search" size={18} color="#9aa5b1" style={{ marginRight: 8 }} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Enter meter number..."
-            placeholderTextColor="#9aa5b1"
-            value={store.meterNumber}
-            onChangeText={(text) => store.setMeterNumber(text)}
-            onSubmitEditing={searchMeter}
-            returnKeyType="search"
-            editable={!store.searching}
-          />
-        </View>
-        <TouchableOpacity 
-          style={[styles.searchBtn, store.searching && styles.searchBtnDisabled]} 
-          onPress={searchMeter}
-          disabled={store.searching}
-        >
-          {store.searching ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Text style={styles.searchBtnText}>Search</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      {/* Leak Location Selection Mode Banner */}
-      {leakSelectionMode && (
-        <View style={styles.leakSelectionBanner}>
-          <Ionicons name="water" size={18} color="#991b1b" />
-          <Text style={styles.leakSelectionBannerText}>
-            Drag the red pin to where the leak is located
-          </Text>
-          <TouchableOpacity 
-            onPress={() => {
-              setLeakSelectionMode(false);
-              setLeakSelectionData(null);
-              store.setDragMode(false);
-              store.setDragPin(null);
-              navigation.goBack();
-            }}
-            style={styles.leakSelectionCancelBtn}
+            <Ionicons name="search" size={18} color="#9aa5b1" style={{ marginRight: 8 }} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Enter meter number..."
+              placeholderTextColor="#9aa5b1"
+              value={store.meterNumber}
+              onChangeText={(text) => store.setMeterNumber(text)}
+              onSubmitEditing={searchMeter}
+              returnKeyType="search"
+              editable={!store.searching}
+            />
+          </View>
+          <TouchableOpacity
+            style={[styles.searchBtn, store.searching && styles.searchBtnDisabled]}
+            onPress={searchMeter}
+            disabled={store.searching}
           >
-            <Text style={styles.leakSelectionCancelText}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Map */}
-      <View 
-        style={styles.mapWrap}
-        onTouchStart={() => setScrollEnabled(false)}
-        onTouchEnd={() => setScrollEnabled(true)}
-        onTouchCancel={() => setScrollEnabled(true)}
-      >
-        <LeafletMap
-          key={`map-${store.currentMeterDetails?.latitude?.toFixed(4) || 'none'}-${store.currentMeterDetails?.longitude?.toFixed(4) || 'none'}`}
-          latitude={store.currentMeterDetails?.latitude || store.marker.latitude}
-          longitude={store.currentMeterDetails?.longitude || store.marker.longitude}
-          zoom={18}
-          markers={[
-            // Show meter marker in leak selection mode (fixed, green)
-            ...(leakSelectionMode && leakSelectionData?.meterCoordinates ? [{
-              latitude: leakSelectionData.meterCoordinates.latitude,
-              longitude: leakSelectionData.meterCoordinates.longitude,
-              title: '🚰 Meter Location',
-              description: `${leakSelectionData.meterData?.meterNumber || 'N/A'} (fixed)`,
-              color: '#10b981',
-              label: '🚰'
-            }] : []),
-            // Add selected meter marker if available (from search or confirmUseNearest)
-            ...(!leakSelectionMode && store.currentMeterDetails?.latitude && store.currentMeterDetails?.longitude && !store.dragMode ? [{
-              latitude: store.currentMeterDetails.latitude,
-              longitude: store.currentMeterDetails.longitude,
-              title: '🚰 Selected Meter',
-              description: `${store.currentMeterDetails.meterNumber || 'N/A'} - ${store.currentMeterDetails.address || 'N/A'}`,
-              color: '#10b981',
-              label: '📍'
-            }] : []),
-            // Add drag pin if in drag mode - make it prominent
-            ...(store.dragPin ? [{
-              latitude: store.dragPin.latitude,
-              longitude: store.dragPin.longitude,
-              title: store.dragMode ? '📍 Drag to set location' : '✅ Selected Location',
-              description: '',
-              color: store.dragMode ? '#f59e0b' : '#10b981',
-              label: store.dragMode ? '📌' : '✓'
-            }] : [])
-          ]}
-          polylines={routeCoordinates.length > 0 ? [{
-            coordinates: routeCoordinates.map(coord => [coord.latitude, coord.longitude]),
-            color: '#3b82f6',
-            weight: 5,
-            opacity: 0.8
-          }] : []}
-          userLocation={{ latitude: store.userGpsLocation.latitude, longitude: store.userGpsLocation.longitude }}
-          showUserLocation={true}
-          onMapPress={handleMapPress}
-          style={StyleSheet.absoluteFill}
-        />
-
-        {/* Source selection modal */}
-  <Modal visible={store.showSourceModal} animationType="fade" transparent onRequestClose={() => store.setShowSourceModal(false)}>
-          <View style={styles.modalOverlay}>
-            <View style={[styles.modalCard, { paddingBottom: 24 + insets.bottom }]}>
-              <Text style={styles.modalTitle}>Select Meter Source</Text>
-              <Text style={styles.modalSubtitle}>Choose how you want to pick the meter for{'\n'}this leak report.</Text>
-
-              <TouchableOpacity style={styles.modalOption} onPress={handleUseCurrentPinpoint} activeOpacity={0.7}>
-                <View style={styles.optionIconWrapper}>
-                  <Ionicons name="radio-button-on" size={24} color="#1e5a8e" />
-                </View>
-                <View style={styles.optionTextWrapper}>
-                  <Text style={styles.optionTitle}>Current Pinpoint</Text>
-                  <Text style={styles.optionSubtitle}>Use the currently selected meter</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.modalOption} onPress={handleNearestMeter} activeOpacity={0.7}>
-                <View style={[styles.optionIconWrapper, { backgroundColor: '#d1fae5' }]}>
-                  <Ionicons name="navigate-circle" size={24} color="#10b981" />
-                </View>
-                <View style={styles.optionTextWrapper}>
-                  <Text style={styles.optionTitle}>Nearest Meter</Text>
-                  <Text style={styles.optionSubtitle}>Find the nearest 1–3 meters using{'\n'}your GPS location</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.modalOption} onPress={handleDragPinOnMap} activeOpacity={0.7}>
-                <View style={styles.optionIconWrapper}>
-                  <Ionicons name="move" size={24} color="#1e5a8e" />
-                </View>
-                <View style={styles.optionTextWrapper}>
-                  <Text style={styles.optionTitle}>Drag Pin on Map</Text>
-                  <Text style={styles.optionSubtitle}>Manually drag the pin to set the{'\n'}leak location</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.modalCancel} onPress={() => store.setShowSourceModal(false)} activeOpacity={0.8}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-
-        {/* Drag Confirmation Modal */}
-  <Modal visible={store.showDragConfirmModal} animationType="slide" transparent onRequestClose={() => store.setShowDragConfirmModal(false)}>
-          <View style={styles.modalOverlay}>
-            <View style={[styles.modalCard, { alignItems: 'center', paddingBottom: 48 + insets.bottom }]}>
-              <View style={{ marginBottom: 8 }}>
-                <LinearGradient colors={[ '#3a8ec9', '#1e5a8e' ]} style={{ width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
-                  <Ionicons name="map" size={34} color="#fff" />
-                </LinearGradient>
-              </View>
-              <Text style={styles.modalTitle}>Enter Drag Mode</Text>
-              <Text style={[styles.modalSubtitle, { marginBottom: 20 }]}>Place a pin on the map by dragging it to the desired location. Your current location will remain visible for reference.</Text>
-
-              <View style={{ flexDirection: 'row', width: '100%', gap: 12, marginBottom: 12 }}>
-                <TouchableOpacity style={[styles.modalActionBtn, styles.modalSecondaryBtn, { flex: 1 }]} onPress={cancelDragModal} activeOpacity={0.85}>
-                  <Text style={styles.modalCancelText}>Maybe Later</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={[styles.modalPrimaryLarge, { flex: 1 }]} onPress={startDragFromModal} activeOpacity={0.85}>
-                  <LinearGradient colors={[ '#3a8ec9', '#1e5a8e' ]} style={styles.modalPrimaryGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
-                      <Ionicons name="navigate" size={18} color="#fff" style={{ marginRight: 8 }} />
-                      <Text style={styles.modalPrimaryText}>Start Pinpoint</Text>
-                    </View>
-                  </LinearGradient>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-
-        {/* Search Results Modal */}
-  <Modal visible={store.showSearchResults} animationType="slide" transparent onRequestClose={() => store.setShowSearchResults(false)}>
-          <View style={styles.modalOverlay}>
-            <View style={[styles.modalCard, { maxHeight: '70%', paddingBottom: 20 + insets.bottom }]}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <Text style={styles.modalTitle}>Search Results</Text>
-                <TouchableOpacity onPress={() => store.setShowSearchResults(false)}>
-                  <Ionicons name="close-circle" size={28} color="#9aa5b1" />
-                </TouchableOpacity>
-              </View>
-              
-              <ScrollView showsVerticalScrollIndicator={false}>
-                {store.searchResults.map((result, index) => (
-                  <TouchableOpacity 
-                    key={index} 
-                    style={styles.searchResultItem}
-                    onPress={() => selectSearchResult(result)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.searchResultIconWrapper}>
-                      <Ionicons name="location" size={24} color="#1e5a8e" />
-                    </View>
-                    <View style={styles.searchResultContent}>
-                      <Text style={styles.searchResultTitle}>
-                        {result.meterNumber || result.accountNumber || 'N/A'}
-                      </Text>
-                      <Text style={styles.searchResultSubtitle}>
-                        Account: {result.accountNumber || 'N/A'}
-                      </Text>
-                      <Text style={styles.searchResultAddress}>
-                        {result.address || 'No address available'}
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
-
-        {/* Floating controls */}
-        <View style={styles.floatControls}>
-          <TouchableOpacity style={styles.floatBtn} onPress={cycleTiles} activeOpacity={0.7}>
-            <Ionicons name="layers" size={22} color="#1e5a8e" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.floatBtn} onPress={locateMe} activeOpacity={0.7}>
-            <MaterialIcons name="my-location" size={22} color="#10b981" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.floatBtn} onPress={refresh} activeOpacity={0.7}>
-            <Ionicons name="refresh-circle" size={24} color="#6366f1" />
+            {store.searching ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.searchBtnText}>Search</Text>
+            )}
           </TouchableOpacity>
         </View>
 
-        {/* Tile Source Badge (top right) */}
-        <View style={styles.tileSourceBadge}>
-          <Ionicons name="map-outline" size={14} color="#1e5a8e" style={{ marginRight: 4 }} />
-          <Text style={styles.tileSourceText}>{TILE_SOURCES[store.tileIndex].name}</Text>
-        </View>
-
-        {/* Attribution */}
-        <View style={styles.attribution}>
-          <Text style={styles.attrText}>{TILE_SOURCES[store.tileIndex].attribution}</Text>
-        </View>
-      </View>
-
-      {/* Meter Details Card */}
-      <View style={styles.detailsCard}>
-  <Text style={styles.detailsTitle}>Meter Details</Text>
-
-        <View style={styles.detailRow}>
-          <Ionicons name="speedometer-outline" size={18} color="#1e3a5f" style={styles.detailIcon} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.detailLabel}>Meter Number</Text>
-            <Text style={styles.detailValue}>{store.currentMeterDetails?.meterNumber || store.meterNumber || 'N/A'}</Text>
+        {/* Leak Location Selection Mode Banner */}
+        {leakSelectionMode && (
+          <View style={styles.leakSelectionBanner}>
+            <Ionicons name="water" size={18} color="#991b1b" />
+            <Text style={styles.leakSelectionBannerText}>
+              Drag the red pin to where the leak is located
+            </Text>
+            <TouchableOpacity
+              onPress={() => {
+                setLeakSelectionMode(false);
+                setLeakSelectionData(null);
+                store.setDragMode(false);
+                store.setDragPin(null);
+                navigation.goBack();
+              }}
+              style={styles.leakSelectionCancelBtn}
+            >
+              <Text style={styles.leakSelectionCancelText}>Cancel</Text>
+            </TouchableOpacity>
           </View>
-        </View>
+        )}
 
-        <View style={styles.detailRow}>
-          <Ionicons name="document-text-outline" size={18} color="#1e3a5f" style={styles.detailIcon} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.detailLabel}>Account Number</Text>
-            <Text style={styles.detailValue}>{store.currentMeterDetails?.accountNumber || 'N/A'}</Text>
-          </View>
-        </View>
-
-        <View style={styles.detailRow}>
-          <Ionicons name="location-outline" size={18} color="#1e3a5f" style={styles.detailIcon} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.detailLabel}>Address</Text>
-            <Text style={styles.detailValue}>{store.currentMeterDetails?.address || 'N/A'}</Text>
-          </View>
-        </View>
-
-        <View style={styles.detailRow}>
-          <Ionicons name="water-outline" size={18} color="#1e3a5f" style={styles.detailIcon} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.detailLabel}>DMA (District Metered Area)</Text>
-            <Text style={styles.detailValue}>{store.currentMeterDetails?.dma || nearestMeterData?.dma || 'N/A'}</Text>
-          </View>
-        </View>
-
-        <TouchableOpacity 
-          style={[styles.primaryBtn, leakSelectionMode && styles.leakSelectionBtn]} 
-          onPress={reportLeak}
+        {/* Map */}
+        <View
+          style={styles.mapWrap}
+          onTouchStart={() => setScrollEnabled(false)}
+          onTouchEnd={() => setScrollEnabled(true)}
+          onTouchCancel={() => setScrollEnabled(true)}
         >
-          <Text style={styles.primaryBtnText}>
-            {leakSelectionMode ? 'Confirm Leak Location' : 'Report Leak'}
-          </Text>
-        </TouchableOpacity>
-      </View>
+          <LeafletMap
+            key={`map-${store.currentMeterDetails?.latitude?.toFixed(4) || 'none'}-${store.currentMeterDetails?.longitude?.toFixed(4) || 'none'}`}
+            latitude={store.currentMeterDetails?.latitude || store.marker.latitude}
+            longitude={store.currentMeterDetails?.longitude || store.marker.longitude}
+            zoom={18}
+            markers={[
+              // Show meter marker in leak selection mode (fixed, green)
+              ...(leakSelectionMode && leakSelectionData?.meterCoordinates ? [{
+                latitude: leakSelectionData.meterCoordinates.latitude,
+                longitude: leakSelectionData.meterCoordinates.longitude,
+                title: '🚰 Meter Location',
+                description: `${leakSelectionData.meterData?.meterNumber || 'N/A'} (fixed)`,
+                color: '#10b981',
+                label: '🚰'
+              }] : []),
+              // Add selected meter marker if available (from search or confirmUseNearest)
+              ...(!leakSelectionMode && store.currentMeterDetails?.latitude && store.currentMeterDetails?.longitude && !store.dragMode ? [{
+                latitude: store.currentMeterDetails.latitude,
+                longitude: store.currentMeterDetails.longitude,
+                title: '🚰 Selected Meter',
+                description: `${store.currentMeterDetails.meterNumber || 'N/A'} - ${store.currentMeterDetails.address || 'N/A'}`,
+                color: '#10b981',
+                label: '📍'
+              }] : []),
+              // Add drag pin if in drag mode - make it prominent
+              ...(store.dragPin ? [{
+                latitude: store.dragPin.latitude,
+                longitude: store.dragPin.longitude,
+                title: store.dragMode ? '📍 Drag to set location' : '✅ Selected Location',
+                description: '',
+                color: store.dragMode ? '#f59e0b' : '#10b981',
+                label: store.dragMode ? '📌' : '✓'
+              }] : [])
+            ]}
+            polylines={routeCoordinates.length > 0 ? [{
+              coordinates: routeCoordinates.map(coord => [coord.latitude, coord.longitude]),
+              color: '#3b82f6',
+              weight: 5,
+              opacity: 0.8
+            }] : []}
+            userLocation={{ latitude: store.userGpsLocation.latitude, longitude: store.userGpsLocation.longitude }}
+            showUserLocation={true}
+            onMapPress={handleMapPress}
+            style={StyleSheet.absoluteFill}
+          />
+
+          {/* Source selection modal */}
+          <Modal visible={store.showSourceModal} animationType="fade" transparent onRequestClose={() => store.setShowSourceModal(false)}>
+            <View style={styles.modalOverlay}>
+              <View style={[styles.modalCard, { paddingBottom: 24 + insets.bottom }]}>
+                <Text style={styles.modalTitle}>Select Meter Source</Text>
+                <Text style={styles.modalSubtitle}>Choose how you want to pick the meter for{'\n'}this leak report.</Text>
+
+                <TouchableOpacity style={styles.modalOption} onPress={handleUseCurrentPinpoint} activeOpacity={0.7}>
+                  <View style={styles.optionIconWrapper}>
+                    <Ionicons name="radio-button-on" size={24} color="#1e5a8e" />
+                  </View>
+                  <View style={styles.optionTextWrapper}>
+                    <Text style={styles.optionTitle}>Current Pinpoint</Text>
+                    <Text style={styles.optionSubtitle}>Use the currently selected meter</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.modalOption} onPress={handleNearestMeter} activeOpacity={0.7}>
+                  <View style={[styles.optionIconWrapper, { backgroundColor: '#d1fae5' }]}>
+                    <Ionicons name="navigate-circle" size={24} color="#10b981" />
+                  </View>
+                  <View style={styles.optionTextWrapper}>
+                    <Text style={styles.optionTitle}>Nearest Meter</Text>
+                    <Text style={styles.optionSubtitle}>Find the nearest 1–3 meters using{'\n'}your GPS location</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.modalOption} onPress={handleDragPinOnMap} activeOpacity={0.7}>
+                  <View style={styles.optionIconWrapper}>
+                    <Ionicons name="move" size={24} color="#1e5a8e" />
+                  </View>
+                  <View style={styles.optionTextWrapper}>
+                    <Text style={styles.optionTitle}>Drag Pin on Map</Text>
+                    <Text style={styles.optionSubtitle}>Manually drag the pin to set the{'\n'}leak location</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.modalCancel} onPress={() => store.setShowSourceModal(false)} activeOpacity={0.8}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Drag Confirmation Modal */}
+          <Modal visible={store.showDragConfirmModal} animationType="slide" transparent onRequestClose={() => store.setShowDragConfirmModal(false)}>
+            <View style={styles.modalOverlay}>
+              <View style={[styles.modalCard, { alignItems: 'center', paddingBottom: 48 + insets.bottom }]}>
+                <View style={{ marginBottom: 8 }}>
+                  <LinearGradient colors={['#3a8ec9', '#1e5a8e']} style={{ width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+                    <Ionicons name="map" size={34} color="#fff" />
+                  </LinearGradient>
+                </View>
+                <Text style={styles.modalTitle}>Enter Drag Mode</Text>
+                <Text style={[styles.modalSubtitle, { marginBottom: 20 }]}>Place a pin on the map by dragging it to the desired location. Your current location will remain visible for reference.</Text>
+
+                <View style={{ flexDirection: 'row', width: '100%', gap: 12, marginBottom: 12 }}>
+                  <TouchableOpacity style={[styles.modalActionBtn, styles.modalSecondaryBtn, { flex: 1 }]} onPress={cancelDragModal} activeOpacity={0.85}>
+                    <Text style={styles.modalCancelText}>Maybe Later</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={[styles.modalPrimaryLarge, { flex: 1 }]} onPress={startDragFromModal} activeOpacity={0.85}>
+                    <LinearGradient colors={['#3a8ec9', '#1e5a8e']} style={styles.modalPrimaryGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+                        <Ionicons name="navigate" size={18} color="#fff" style={{ marginRight: 8 }} />
+                        <Text style={styles.modalPrimaryText}>Start Pinpoint</Text>
+                      </View>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Search Results Modal */}
+          <Modal visible={store.showSearchResults} animationType="slide" transparent onRequestClose={() => store.setShowSearchResults(false)}>
+            <View style={styles.modalOverlay}>
+              <View style={[styles.modalCard, { maxHeight: '70%', paddingBottom: 20 + insets.bottom }]}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <Text style={styles.modalTitle}>Search Results</Text>
+                  <TouchableOpacity onPress={() => store.setShowSearchResults(false)}>
+                    <Ionicons name="close-circle" size={28} color="#9aa5b1" />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView showsVerticalScrollIndicator={false}>
+                  {store.searchResults.map((result, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      style={styles.searchResultItem}
+                      onPress={() => selectSearchResult(result)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.searchResultIconWrapper}>
+                        <Ionicons name="location" size={24} color="#1e5a8e" />
+                      </View>
+                      <View style={styles.searchResultContent}>
+                        <Text style={styles.searchResultTitle}>
+                          {result.meterNumber || result.accountNumber || 'N/A'}
+                        </Text>
+                        <Text style={styles.searchResultSubtitle}>
+                          Account: {result.accountNumber || 'N/A'}
+                        </Text>
+                        <Text style={styles.searchResultAddress}>
+                          {result.address || 'No address available'}
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Floating controls */}
+          <View style={styles.floatControls}>
+            <TouchableOpacity style={styles.floatBtn} onPress={cycleTiles} activeOpacity={0.7}>
+              <Ionicons name="layers" size={22} color="#1e5a8e" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.floatBtn} onPress={locateMe} activeOpacity={0.7}>
+              <MaterialIcons name="my-location" size={22} color="#10b981" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.floatBtn} onPress={refresh} activeOpacity={0.7}>
+              <Ionicons name="refresh-circle" size={24} color="#6366f1" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Tile Source Badge (top right) */}
+          <View style={styles.tileSourceBadge}>
+            <Ionicons name="map-outline" size={14} color="#1e5a8e" style={{ marginRight: 4 }} />
+            <Text style={styles.tileSourceText}>{TILE_SOURCES[store.tileIndex].name}</Text>
+          </View>
+
+          {/* Attribution */}
+          <View style={styles.attribution}>
+            <Text style={styles.attrText}>{TILE_SOURCES[store.tileIndex].attribution}</Text>
+          </View>
+        </View>
+
+        {/* Meter Details Card */}
+        <View style={styles.detailsCard}>
+          <Text style={styles.detailsTitle}>Meter Details</Text>
+
+          <View style={styles.detailRow}>
+            <Ionicons name="speedometer-outline" size={18} color="#1e3a5f" style={styles.detailIcon} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.detailLabel}>Meter Number</Text>
+              <Text style={styles.detailValue}>{store.currentMeterDetails?.meterNumber || store.meterNumber || 'N/A'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.detailRow}>
+            <Ionicons name="document-text-outline" size={18} color="#1e3a5f" style={styles.detailIcon} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.detailLabel}>Account Number</Text>
+              <Text style={styles.detailValue}>{store.currentMeterDetails?.accountNumber || 'N/A'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.detailRow}>
+            <Ionicons name="location-outline" size={18} color="#1e3a5f" style={styles.detailIcon} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.detailLabel}>Address</Text>
+              <Text style={styles.detailValue}>{store.currentMeterDetails?.address || 'N/A'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.detailRow}>
+            <Ionicons name="water-outline" size={18} color="#1e3a5f" style={styles.detailIcon} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.detailLabel}>DMA (District Metered Area)</Text>
+              <Text style={styles.detailValue}>{store.currentMeterDetails?.dma || nearestMeterData?.dma || 'N/A'}</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.primaryBtn, leakSelectionMode && styles.leakSelectionBtn]}
+            onPress={reportLeak}
+          >
+            <Text style={styles.primaryBtnText}>
+              {leakSelectionMode ? 'Confirm Leak Location' : 'Report Leak'}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );

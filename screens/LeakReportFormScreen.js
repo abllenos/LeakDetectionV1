@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import { pushNotification } from '../services/notifications';
 import { submitLeakReport } from '../services/interceptor';
 import { observer } from 'mobx-react-lite';
@@ -21,46 +22,145 @@ import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { saveCurrentFormData, clearCurrentFormData, saveToDrafts, setFormActive } from '../services/draftService';
 import styles from '../styles/LeakReportFormStyles';
 
+// Helper function to save photo to persistent storage
+const savePhotoToStorage = async (tempUri) => {
+  try {
+    console.log('[LeakReportForm] Starting photo save from:', tempUri);
+
+    // Verify temp file exists
+    const tempFileInfo = await FileSystem.getInfoAsync(tempUri);
+    console.log('[LeakReportForm] Temp file info:', { exists: tempFileInfo.exists, size: tempFileInfo.size });
+    if (!tempFileInfo.exists) {
+      throw new Error(`Temporary photo file does not exist: ${tempUri}`);
+    }
+
+    // Create photos directory if it doesn't exist
+    const photosDir = `${FileSystem.documentDirectory}leak_photos/`;
+    console.log('[LeakReportForm] Photos directory:', photosDir);
+
+    const dirInfo = await FileSystem.getInfoAsync(photosDir);
+    console.log('[LeakReportForm] Photos dir exists:', dirInfo.exists);
+
+    if (!dirInfo.exists) {
+      console.log('[LeakReportForm] Creating photos directory...');
+      await FileSystem.makeDirectoryAsync(photosDir, { intermediates: true });
+      console.log('[LeakReportForm] Photos directory created');
+    }
+
+    // Generate unique filename with timestamp
+    const filename = `photo_${Date.now()}.jpg`;
+    const persistentUri = `${photosDir}${filename}`;
+    console.log('[LeakReportForm] Copying to:', persistentUri);
+
+    // Copy the temporary file to persistent storage
+    await FileSystem.copyAsync({
+      from: tempUri,
+      to: persistentUri,
+    });
+
+    // Verify the file was saved
+    const savedFileInfo = await FileSystem.getInfoAsync(persistentUri);
+    console.log('[LeakReportForm] Saved file info:', { exists: savedFileInfo.exists, size: savedFileInfo.size });
+
+    if (!savedFileInfo.exists) {
+      throw new Error(`Failed to copy photo - file does not exist at destination: ${persistentUri}`);
+    }
+
+    // Return with file:// prefix
+    const fileUri = `file://${persistentUri}`;
+    console.log('[LeakReportForm] Photo saved successfully:', fileUri);
+    return fileUri;
+  } catch (error) {
+    console.error('[LeakReportForm] Error saving photo to storage:', error.message, error);
+    throw error;
+  }
+};
+
+// Helper function to delete photo from persistent storage
+const deletePhotoFromStorage = async (photoUri) => {
+  try {
+    if (photoUri && photoUri.includes('leak_photos')) {
+      // Remove file:// prefix if present for getInfoAsync
+      const pathToCheck = photoUri.startsWith('file://') ? photoUri.slice(7) : photoUri;
+      console.log('[LeakReportForm] Checking photo for deletion:', pathToCheck);
+
+      const fileInfo = await FileSystem.getInfoAsync(pathToCheck);
+      console.log('[LeakReportForm] Photo file exists:', fileInfo.exists);
+
+      if (fileInfo.exists) {
+        await FileSystem.deleteAsync(pathToCheck, { idempotent: true });
+        console.log('[LeakReportForm] Photo deleted from storage:', pathToCheck);
+      }
+    }
+  } catch (error) {
+    console.error('[LeakReportForm] Error deleting photo:', error);
+    // Don't throw - continue operation even if deletion fails
+  }
+};
+
+// Helper function to ensure photo URI has proper format
+const getPhotoUri = (uri) => {
+  if (!uri) return null;
+
+  // If it's a network URI, return as is
+  if (uri.startsWith('http://') || uri.startsWith('https://')) {
+    return uri;
+  }
+
+  // If it already has file:// prefix, return as is (it's already properly formatted)
+  if (uri.startsWith('file://')) {
+    return uri;
+  }
+
+  // If it's a local path (starts with /), add file:// prefix
+  if (uri.startsWith('/')) {
+    return `file://${uri}`;
+  }
+
+  // Otherwise return as is
+  return uri;
+};
+
 const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coordinates: initialCoordinates, fromNearest, navigation, route }) => {
   const form = useLeakReportStore();
   const draftsStore = useDraftsStore();
   const offlineStore = useOfflineStore();
   const [showPreview, setShowPreview] = React.useState(false);
   const isFocused = useIsFocused();
-  
+
   // Store meter data and coordinates in local state to persist across navigations
   const [meterData, setMeterData] = React.useState(initialMeterData);
   const [coordinates, setCoordinates] = React.useState(initialCoordinates);
-  
+
   // Track if we've processed the leak location params
   const processedTimestampRef = React.useRef(null);
-  
+
   // Auto-save interval ref
   const autoSaveIntervalRef = useRef(null);
-  
+
   // Track if loading from draft
   const [loadingFromDraft, setLoadingFromDraft] = React.useState(false);
   const [currentDraftId, setCurrentDraftId] = React.useState(null);
-  
+
   // Mark form as active when screen is focused, inactive when leaving
   useEffect(() => {
     // Mark form as active when entering
     setFormActive(true);
     console.log('[LeakReportForm] Form screen entered - marked as ACTIVE');
-    
+
     return () => {
       // Mark form as inactive when leaving (but NOT if going to map for location)
       // The cleanup will run when unmounting
       console.log('[LeakReportForm] Form screen cleanup');
     };
   }, []);
-  
+
   // Handle navigation away - clear active flag only on real leave (not map selection)
   useFocusEffect(
     React.useCallback(() => {
       // Screen focused
       setFormActive(true);
-      
+
       return () => {
         // Screen unfocused - check if navigating to map for location selection
         const currentRoute = navigation.getState?.()?.routes?.slice(-1)[0]?.name;
@@ -71,7 +171,7 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
       };
     }, [navigation])
   );
-  
+
   // Initialize meter data from props on mount
   useEffect(() => {
     if (initialMeterData) {
@@ -88,14 +188,17 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
     if (params.fromDraft && params.draftData) {
       setLoadingFromDraft(true);
       setCurrentDraftId(params.draftId);
-      
+
       const draft = params.draftData;
       console.log('[LeakReportForm] Loading from draft:', draft.id);
-      
+
+      // Clear the form first to ensure clean state
+      form.reset();
+
       // Restore meter data and coordinates
       if (draft.meterData) setMeterData(draft.meterData);
       if (draft.coordinates) setCoordinates(draft.coordinates);
-      
+
       // Restore form fields
       if (draft.leakType) form.setLeakType(draft.leakType);
       if (draft.location) form.setLocation(draft.location);
@@ -109,18 +212,51 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
       if (draft.dma) form.setDma(draft.dma);
       if (draft.flagProjectLeak !== null) form.setFlagProjectLeak(draft.flagProjectLeak);
       if (draft.featuredId) form.setFeaturedId(draft.featuredId);
-      
+
       // Restore photos
       if (draft.leakPhotos && draft.leakPhotos.length > 0) {
-        draft.leakPhotos.forEach(uri => form.addLeakPhoto(uri));
+        console.log('[LeakReportForm] Restoring leak photos:', draft.leakPhotos);
+        draft.leakPhotos.forEach(async (uri) => {
+          if (uri) {
+            // Verify photo file exists before adding
+            try {
+              const photoPath = uri.replace(/^file:\/\//, '');
+              const fileInfo = await FileSystem.getInfoAsync(photoPath);
+              console.log(`[LeakReportForm] Photo exists: ${photoPath} = ${fileInfo.exists}`);
+              if (fileInfo.exists) {
+                form.addLeakPhoto(uri);
+                console.log('[LeakReportForm] Added leak photo:', uri);
+              } else {
+                console.warn('[LeakReportForm] Photo file does not exist:', photoPath);
+              }
+            } catch (error) {
+              console.error('[LeakReportForm] Error checking photo file:', error);
+              // Still try to add it in case of permission issues
+              form.addLeakPhoto(uri);
+            }
+          }
+        });
       }
-      if (draft.landmarkPhoto) form.setLandmarkPhoto(draft.landmarkPhoto);
-      
-      // Restore leak location
-      if (draft.leakLatitude && draft.leakLongitude) {
-        form.setLeakLocation(draft.leakLatitude, draft.leakLongitude, draft.leakLocationMethod);
+      if (draft.landmarkPhoto) {
+        console.log('[LeakReportForm] Restoring landmark photo:', draft.landmarkPhoto);
+        // Verify landmark photo file exists
+        (async () => {
+          try {
+            const photoPath = draft.landmarkPhoto.replace(/^file:\/\//, '');
+            const fileInfo = await FileSystem.getInfoAsync(photoPath);
+            console.log(`[LeakReportForm] Landmark photo exists: ${photoPath} = ${fileInfo.exists}`);
+            if (fileInfo.exists) {
+              form.setLandmarkPhoto(draft.landmarkPhoto);
+            } else {
+              console.warn('[LeakReportForm] Landmark photo file does not exist:', photoPath);
+            }
+          } catch (error) {
+            console.error('[LeakReportForm] Error checking landmark photo:', error);
+            form.setLandmarkPhoto(draft.landmarkPhoto);
+          }
+        })();
       }
-      
+
       setLoadingFromDraft(false);
     }
   }, [route?.params?.fromDraft]);
@@ -149,19 +285,19 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
         leakLongitude: form.leakLongitude,
         leakLocationMethod: form.leakLocationMethod,
       };
-      
+
       // Only save if there's meaningful data
       if (meterData || form.leakType || form.location || form.leakPhotos.length > 0) {
         saveCurrentFormData(formData);
       }
     };
-    
+
     // Save immediately when form changes
     saveFormForRecovery();
-    
+
     // Set up periodic auto-save
     autoSaveIntervalRef.current = setInterval(saveFormForRecovery, 30000);
-    
+
     return () => {
       if (autoSaveIntervalRef.current) {
         clearInterval(autoSaveIntervalRef.current);
@@ -180,21 +316,21 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
   React.useLayoutEffect(() => {
     const params = route?.params || {};
     const timestamp = params._timestamp;
-    
+
     console.log('📍 LeakReportForm LAYOUT EFFECT - checking params');
     console.log('📍 params:', JSON.stringify(params));
     console.log('📍 processedTimestampRef:', processedTimestampRef.current, 'current timestamp:', timestamp);
-    
+
     if (params.fromLeakLocationSelection && params.leakLocation && timestamp && timestamp !== processedTimestampRef.current) {
       console.log('📍 ✅ Processing leak location selection return in LAYOUT EFFECT!');
       processedTimestampRef.current = timestamp;
-      
+
       // Set the leak location IMMEDIATELY
       const lat = params.leakLocation.latitude;
       const lng = params.leakLocation.longitude;
       console.log('📍 ✅ Setting leak location:', lat, lng);
       form.setLeakLocation(lat, lng, 'dragPin');
-      
+
       // Restore meter data if passed back
       if (params.meterData) {
         console.log('📍 Restoring meter data:', params.meterData);
@@ -212,24 +348,34 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
       Alert.alert('Limit reached', 'You can only upload 2 leak photos.');
       return;
     }
-    
+
     // Request camera permissions and take photo
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission required', 'Camera permissions are needed to take photos.');
       return;
     }
-    
+
     const result = await ImagePicker.launchCameraAsync({
       allowsEditing: false,
       quality: 0.8,
     });
     if (!result.canceled && result.assets[0]) {
-      form.addLeakPhoto(result.assets[0].uri);
+      try {
+        // Save the photo to persistent storage instead of using temp URI
+        const persistentUri = await savePhotoToStorage(result.assets[0].uri);
+        form.addLeakPhoto(persistentUri);
+      } catch (error) {
+        Alert.alert('Error', 'Failed to save photo. Please try again.');
+        console.error('[LeakReportForm] Error saving leak photo:', error);
+      }
     }
   };
 
   const removeLeakPhoto = (index) => {
+    // Delete the photo from persistent storage before removing from form
+    const photoUri = form.leakPhotos[index];
+    deletePhotoFromStorage(photoUri);
     form.removeLeakPhoto(index);
   };
 
@@ -240,17 +386,26 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
       Alert.alert('Permission required', 'Camera permissions are needed to take photos.');
       return;
     }
-    
+
     const result = await ImagePicker.launchCameraAsync({
       allowsEditing: false,
       quality: 0.8,
     });
     if (!result.canceled && result.assets[0]) {
-      form.setLandmarkPhoto(result.assets[0].uri);
+      try {
+        // Save the photo to persistent storage instead of using temp URI
+        const persistentUri = await savePhotoToStorage(result.assets[0].uri);
+        form.setLandmarkPhoto(persistentUri);
+      } catch (error) {
+        Alert.alert('Error', 'Failed to save photo. Please try again.');
+        console.error('[LeakReportForm] Error saving landmark photo:', error);
+      }
     }
   };
 
   const removeLandmarkPhoto = () => {
+    // Delete the photo from persistent storage before removing
+    deletePhotoFromStorage(form.landmarkPhoto);
     form.clearLandmarkPhoto();
   };
 
@@ -277,7 +432,7 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
       leakLongitude: form.leakLongitude,
       leakLocationMethod: form.leakLocationMethod,
     };
-    
+
     try {
       if (currentDraftId) {
         // Update existing draft
@@ -287,14 +442,14 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
         const draftId = await draftsStore.saveDraft(formData);
         setCurrentDraftId(draftId);
       }
-      
+
       // Clear current form data since it's now in drafts
       await clearCurrentFormData();
-      
+
       Alert.alert('Saved', 'Report saved as draft.', [
         { text: 'Continue Editing' },
-        { 
-          text: 'Go to Drafts', 
+        {
+          text: 'Go to Drafts',
           onPress: () => {
             setFormActive(false); // Clear active flag when leaving
             form.reset();
@@ -334,7 +489,7 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
       Alert.alert('Missing info', 'Please provide contact person.');
       return;
     }
-    
+
     // Show preview modal instead of sending directly
     setShowPreview(true);
   };
@@ -342,7 +497,7 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
   const confirmSendReport = async () => {
     setShowPreview(false);
     form.submitting = true;
-    
+
     // Check if offline - save as draft instead
     if (!offlineStore.isOnline) {
       try {
@@ -367,24 +522,26 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
           leakLongitude: form.leakLongitude,
           leakLocationMethod: form.leakLocationMethod,
         };
-        
+
         await saveToDrafts(formData, { offlineSaved: true });
         await clearCurrentFormData();
         await setFormActive(false); // Clear active flag on offline save
-        
+
         // Delete the draft if we were editing one
         if (currentDraftId) {
           await draftsStore.deleteDraft(currentDraftId);
         }
-        
+
         form.submitting = false;
         Alert.alert(
-          'Saved Offline', 
+          'Saved Offline',
           'You are offline. Your report has been saved to drafts and will need to be submitted when you are back online.',
-          [{ text: 'OK', onPress: () => {
-            form.reset();
-            navigation.navigate('MainTabs', { screen: 'Drafts' });
-          }}]
+          [{
+            text: 'OK', onPress: () => {
+              form.reset();
+              navigation.navigate('MainTabs', { screen: 'Drafts' });
+            }
+          }]
         );
         return;
       } catch (error) {
@@ -393,54 +550,56 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
         return;
       }
     }
-    
+
     try {
       // Use leak location if set, otherwise use meter coordinates
       const leakCoords = form.leakLatitude && form.leakLongitude
         ? { latitude: form.leakLatitude, longitude: form.leakLongitude }
         : coordinates;
-      
+
       // Build Geom field for backend (comma-separated string) - this is the LEAK location
       const Geom = leakCoords && leakCoords.longitude && leakCoords.latitude
         ? `${leakCoords.longitude}, ${leakCoords.latitude}`
         : null;
       // Build payload for backend
       const payload = {
-  leakType: form.leakType,
-  location: form.location,
-  covering: form.covering,
-  causeOfLeak: form.causeOfLeak,
-  causeOther: form.causeOther,
-  dma: form.dma,
-  contactName: form.contactName,
-  contactNumber: form.contactNumber,
-  landmark: form.landmark,
-  leakPhotos: form.leakPhotos,
-  landmarkPhoto: form.landmarkPhoto,
-  pressure: form.pressure,
-  flagProjectLeak: form.flagProjectLeak,
-  featuredId: form.featuredId,
-  meterData,
-  coordinates: leakCoords, // This is the actual leak location (or meter location if not set)
-  meterCoordinates: coordinates, // Original meter coordinates for reference
-  geom: Geom,
-  leakLocationMethod: form.leakLocationMethod, // 'current', 'dragPin', or null
+        leakType: form.leakType,
+        location: form.location,
+        covering: form.covering,
+        causeOfLeak: form.causeOfLeak,
+        causeOther: form.causeOther,
+        dma: form.dma,
+        contactName: form.contactName,
+        contactNumber: form.contactNumber,
+        landmark: form.landmark,
+        leakPhotos: form.leakPhotos,
+        landmarkPhoto: form.landmarkPhoto,
+        pressure: form.pressure,
+        flagProjectLeak: form.flagProjectLeak,
+        featuredId: form.featuredId,
+        meterData,
+        coordinates: leakCoords, // This is the actual leak location (or meter location if not set)
+        meterCoordinates: coordinates, // Original meter coordinates for reference
+        geom: Geom,
+        leakLocationMethod: form.leakLocationMethod, // 'current', 'dragPin', or null
       };
       await submitLeakReport(payload);
-      
+
       // Clear current form data and delete draft if editing
       await clearCurrentFormData();
       await setFormActive(false); // Clear active flag on successful submit
       if (currentDraftId) {
         await draftsStore.deleteDraft(currentDraftId);
       }
-      
+
       form.submitting = false;
       Alert.alert('Report sent', 'Your leak report has been submitted successfully.', [
-        { text: 'OK', onPress: () => {
-          form.reset();
-          navigation.goBack();
-        }},
+        {
+          text: 'OK', onPress: () => {
+            form.reset();
+            navigation.goBack();
+          }
+        },
       ]);
       try {
         pushNotification({
@@ -465,7 +624,7 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
       form.reset();
     }
     form.loadDmaOptions();
-    return () => {};
+    return () => { };
   }, []);
 
   // Auto-populate contact name and number with logged-in user's data
@@ -476,7 +635,7 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
-        <TouchableOpacity 
+        <TouchableOpacity
           onPress={() => {
             // If came from nearest meters flow, navigate to ReportMap
             if (fromNearest) {
@@ -484,7 +643,7 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
             } else {
               navigation.goBack();
             }
-          }} 
+          }}
           style={styles.closeBtn}
         >
           <Ionicons name="close" size={24} color="#334155" />
@@ -518,13 +677,13 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
             <Ionicons name="pin" size={18} color="#dc2626" />
             <Text style={styles.leakLocationTitle}>  Leak Location</Text>
           </View>
-          
+
           {form.leakLatitude && form.leakLongitude ? (
             <View style={styles.leakLocationSet}>
               <Text style={styles.leakMethodText}>
                 {form.leakLocationMethod === 'current' ? '📍 Using current GPS location' : '🗺️ Selected on map'}
               </Text>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.clearLeakLocationBtn}
                 onPress={() => form.clearLeakLocation()}
               >
@@ -562,7 +721,7 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
                 <TouchableOpacity
                   style={[styles.leakLocationBtn, styles.leakLocationBtnSecondary]}
                   onPress={() => {
-                    navigation.navigate('ReportMap', { 
+                    navigation.navigate('ReportMap', {
                       selectLeakLocation: true,
                       meterCoordinates: coordinates,
                       meterData: meterData,
@@ -648,8 +807,8 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
         </View>
 
         {/* Covering */}
-        <TouchableOpacity 
-          style={styles.collapseHeader} 
+        <TouchableOpacity
+          style={styles.collapseHeader}
           onPress={() => form.setCoveringExpanded(!form.coveringExpanded)}
           activeOpacity={0.7}
         >
@@ -659,13 +818,13 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
               <Text style={styles.selectedValue}>{form.covering}</Text>
             )}
           </View>
-          <Ionicons 
-            name={form.coveringExpanded ? "chevron-up" : "chevron-down"} 
-            size={20} 
-            color="#6b7280" 
+          <Ionicons
+            name={form.coveringExpanded ? "chevron-up" : "chevron-down"}
+            size={20}
+            color="#6b7280"
           />
         </TouchableOpacity>
-        
+
         {form.coveringExpanded && (
           <View style={styles.radioList}>
             <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCovering('Concrete'); form.setCoveringExpanded(false); }}>
@@ -688,8 +847,8 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
         )}
 
         {/* Cause of Leak */}
-        <TouchableOpacity 
-          style={styles.collapseHeader} 
+        <TouchableOpacity
+          style={styles.collapseHeader}
           onPress={() => form.setCauseExpanded(!form.causeExpanded)}
           activeOpacity={0.7}
         >
@@ -699,13 +858,13 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
               <Text style={styles.selectedValue}>{form.causeOfLeak === 'Others' ? form.causeOther || 'Others' : form.causeOfLeak}</Text>
             )}
           </View>
-          <Ionicons 
-            name={form.causeExpanded ? "chevron-up" : "chevron-down"} 
-            size={20} 
-            color="#6b7280" 
+          <Ionicons
+            name={form.causeExpanded ? "chevron-up" : "chevron-down"}
+            size={20}
+            color="#6b7280"
           />
         </TouchableOpacity>
-        
+
         {form.causeExpanded && (
           <>
             <View style={styles.radioList}>
@@ -811,17 +970,21 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
           <Text style={styles.photoLabel}>Leak Photos (2 only) <Text style={{ color: '#ef4444' }}>*</Text></Text>
           <Text style={styles.photoCount}>{form.leakPhotos.length}/2</Text>
         </View>
-        
+
         {/* Display leak photos */}
         <View style={styles.photoGrid}>
-          {form.leakPhotos.map((uri, index) => (
-            <View key={index} style={styles.photoPreview}>
-              <Image source={{ uri }} style={styles.photoImage} />
-              <TouchableOpacity style={styles.photoRemove} onPress={() => removeLeakPhoto(index)}>
-                <Ionicons name="close-circle" size={24} color="#ef4444" />
-              </TouchableOpacity>
-            </View>
-          ))}
+          {form.leakPhotos.map((uri, index) => {
+            const displayUri = getPhotoUri(uri);
+            console.log(`[LeakReportForm] Displaying photo ${index}:`, uri, '=> Final URI:', displayUri);
+            return (
+              <View key={index} style={styles.photoPreview}>
+                <Image source={{ uri: displayUri }} style={styles.photoImage} />
+                <TouchableOpacity style={styles.photoRemove} onPress={() => removeLeakPhoto(index)}>
+                  <Ionicons name="close-circle" size={24} color="#ef4444" />
+                </TouchableOpacity>
+              </View>
+            );
+          })}
           {form.leakPhotos.length < 2 && (
             <TouchableOpacity style={styles.photoBtn} onPress={pickLeakPhoto}>
               <Ionicons name="camera" size={28} color="#1e5a8e" />
@@ -835,17 +998,22 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
           <Text style={styles.photoLabel}>Landmark Photo</Text>
           <Text style={styles.photoCount}>{form.landmarkPhoto ? '1' : '0'}/1</Text>
         </View>
-        
+
         {/* Display landmark photo */}
         <View style={styles.photoGrid}>
-          {form.landmarkPhoto ? (
-            <View style={styles.photoPreview}>
-              <Image source={{ uri: form.landmarkPhoto }} style={styles.photoImage} />
-              <TouchableOpacity style={styles.photoRemove} onPress={removeLandmarkPhoto}>
-                <Ionicons name="close-circle" size={24} color="#ef4444" />
-              </TouchableOpacity>
-            </View>
-          ) : (
+          {form.landmarkPhoto && (() => {
+            const displayUri = getPhotoUri(form.landmarkPhoto);
+            console.log('[LeakReportForm] Displaying landmark photo:', form.landmarkPhoto, '=> Final URI:', displayUri);
+            return (
+              <View style={styles.photoPreview}>
+                <Image source={{ uri: displayUri }} style={styles.photoImage} />
+                <TouchableOpacity style={styles.photoRemove} onPress={removeLandmarkPhoto}>
+                  <Ionicons name="close-circle" size={24} color="#ef4444" />
+                </TouchableOpacity>
+              </View>
+            );
+          })()}
+          {!form.landmarkPhoto && (
             <TouchableOpacity style={styles.photoBtn} onPress={pickLandmarkPhoto}>
               <Ionicons name="camera" size={28} color="#1e5a8e" />
               <Text style={styles.photoBtnLabel}>+</Text>
@@ -862,18 +1030,18 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
         {/* Buttons Row */}
         <View style={styles.buttonRow}>
           {/* Save Draft Button */}
-          <TouchableOpacity 
-            style={styles.saveDraftBtn} 
+          <TouchableOpacity
+            style={styles.saveDraftBtn}
             onPress={handleSaveDraft}
           >
             <Ionicons name="save-outline" size={20} color="#3b82f6" />
             <Text style={styles.saveDraftBtnText}>Save Draft</Text>
           </TouchableOpacity>
-          
+
           {/* Send Report Button */}
-          <TouchableOpacity 
-            style={[styles.sendBtn, !offlineStore.isOnline && styles.sendBtnOffline]} 
-            onPress={handleSendReport} 
+          <TouchableOpacity
+            style={[styles.sendBtn, !offlineStore.isOnline && styles.sendBtnOffline]}
+            onPress={handleSendReport}
             disabled={form.submitting}
           >
             {form.submitting ? (
@@ -901,7 +1069,7 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
                 <Ionicons name="close" size={24} color="#6b7280" />
               </TouchableOpacity>
             </View>
-            
+
             <ScrollView style={styles.previewScroll} showsVerticalScrollIndicator={false}>
               {/* Meter Info */}
               <View style={styles.previewSection}>
@@ -984,7 +1152,7 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
                 {form.leakPhotos.length > 0 && (
                   <View style={styles.previewPhotoRow}>
                     {form.leakPhotos.map((uri, idx) => (
-                      <Image key={idx} source={{ uri }} style={styles.previewPhoto} />
+                      <Image key={idx} source={{ uri: getPhotoUri(uri) }} style={styles.previewPhoto} />
                     ))}
                   </View>
                 )}
@@ -994,7 +1162,7 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
                 </View>
                 {form.landmarkPhoto && (
                   <View style={styles.previewPhotoRow}>
-                    <Image source={{ uri: form.landmarkPhoto }} style={styles.previewPhoto} />
+                    <Image source={{ uri: getPhotoUri(form.landmarkPhoto) }} style={styles.previewPhoto} />
                   </View>
                 )}
               </View>
@@ -1002,14 +1170,14 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
 
             {/* Action Buttons */}
             <View style={styles.previewActions}>
-              <TouchableOpacity 
-                style={styles.previewCancelBtn} 
+              <TouchableOpacity
+                style={styles.previewCancelBtn}
                 onPress={() => setShowPreview(false)}
               >
                 <Text style={styles.previewCancelText}>Edit Report</Text>
               </TouchableOpacity>
-              <TouchableOpacity 
-                style={styles.previewConfirmBtn} 
+              <TouchableOpacity
+                style={styles.previewConfirmBtn}
                 onPress={confirmSendReport}
                 disabled={form.submitting}
               >
@@ -1035,8 +1203,8 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
 const LeakReportFormScreen = ({ navigation, route }) => {
   const { meterData, coordinates, fromNearest } = route?.params || {};
   return (
-    <LeakReportFormScreenInner 
-      navigation={navigation} 
+    <LeakReportFormScreenInner
+      navigation={navigation}
       route={route}
       meterData={meterData}
       coordinates={coordinates}

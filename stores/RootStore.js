@@ -9,6 +9,7 @@ import { ReportMapStore } from './ReportMapStore';
 import { SettingsStore } from './SettingsStore';
 import OfflineStore from './OfflineStore';
 import DraftsStore from './DraftsStore';
+import GisCustomerStore from './GisCustomerStore';
 
 class RootStore {
   constructor() {
@@ -22,6 +23,7 @@ class RootStore {
     this.settingsStore = new SettingsStore();
     this.offlineStore = new OfflineStore();
     this.draftsStore = new DraftsStore();
+    this.gisCustomerStore = new GisCustomerStore();
   }
 
   reset() {
@@ -64,6 +66,7 @@ export const useReportMapStore = () => useStores().reportMapStore;
 export const useSettingsStore = () => useStores().settingsStore;
 export const useOfflineStore = () => useStores().offlineStore;
 export const useDraftsStore = () => useStores().draftsStore;
+export const useGisCustomerStore = () => useStores().gisCustomerStore;
 
 export { StoreContext, rootStore };
 export default RootStore;

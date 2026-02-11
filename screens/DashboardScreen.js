@@ -1,8 +1,8 @@
 import React from 'react';
-import { 
-  View, 
-  Text, 
-  ScrollView, 
+import {
+  View,
+  Text,
+  ScrollView,
   TouchableOpacity,
   StatusBar,
   Modal,
@@ -16,59 +16,79 @@ import { useEffect, useRef } from 'react';
 import { ActivityIndicator } from 'react-native';
 import { startPeriodicDataCheck, stopPeriodicDataCheck } from '../services/dataChecker';
 import { observer } from 'mobx-react-lite';
-import { useDashboardStore, useOfflineStore } from '../stores/RootStore';
+import { useDashboardStore, useOfflineStore, useDownloadStore, useGisCustomerStore } from '../stores/RootStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { preCacheCustomers, checkCustomerDataIntegrity, resumeCustomerDownload } from '../services/interceptor';
+import MapStore from '../stores/MapStore';
+import { requestNotificationPermissions, showNotification } from '../services/notifications';
 import styles from '../styles/DashboardStyles';
 
 const DashboardScreen = observer(({ navigation }) => {
   const dashboardStore = useDashboardStore();
+  const downloadStore = useDownloadStore();
+  const gisCustomerStore = useGisCustomerStore();
   const offlineStore = useOfflineStore();
   const dataCheckIntervalRef = useRef(null);
 
   useEffect(() => {
     console.log('[Dashboard] Component mounted, loading data...');
-    
+
     const loadData = async () => {
       try {
         // Load user data and reports
         await dashboardStore.loadUserData();
-        await dashboardStore.loadLeakReports();
+
+        if (offlineStore.isOnline) {
+          await dashboardStore.loadLeakReports();
+        }
+
         // Check customer data status for offline access
-        await dashboardStore.checkCustomerDataStatus();
+        await gisCustomerStore.checkCustomerDataStatus();
+        // Check for updates and prompt if needed
+        if (offlineStore.isOnline) {
+          gisCustomerStore.checkForUpdates();
+        }
         dashboardStore.setInitialLoadComplete(true);
         console.log('[Dashboard] Initial data load complete');
-        
-        // Check for new customers after initial load
-        checkForNewCustomers();
+
+        // Check for offline maps and download if not available
+        if (offlineStore.isOnline) {
+          checkAndDownloadOfflineMaps();
+        }
+
       } catch (error) {
         console.error('[Dashboard] Error loading initial data:', error);
         dashboardStore.setInitialLoadComplete(true); // Still mark as complete to prevent infinite loading
       }
     };
-    
+
     loadData();
-    
+
     // Start periodic data checking (every 1 hour)
-    dataCheckIntervalRef.current = startPeriodicDataCheck();
+    if (offlineStore.isOnline) {
+      dataCheckIntervalRef.current = startPeriodicDataCheck();
+    }
 
     const unsubscribe = navigation.addListener('focus', () => {
       console.log('[Dashboard] Screen focused, refreshing data...');
       dashboardStore.loadUserData();
-      dashboardStore.loadLeakReports();
+      if (offlineStore.isOnline) {
+        dashboardStore.loadLeakReports();
+        // Check for updates and prompt if needed
+        gisCustomerStore.checkForUpdates();
+      }
       // Re-check customer data status
-      dashboardStore.checkCustomerDataStatus();
-      // Also check for new customers when screen is focused
-      checkForNewCustomers();
+      gisCustomerStore.checkCustomerDataStatus();
     });
-    
+
     return () => {
       unsubscribe();
       // Stop periodic checking when component unmounts
-      stopPeriodicDataCheck(dataCheckIntervalRef.current);
+      if (dataCheckIntervalRef.current) {
+        stopPeriodicDataCheck(dataCheckIntervalRef.current);
+      }
       console.log('[Dashboard] Component unmounted');
     };
-  }, []);
+  }, [offlineStore.isOnline]);
 
   const statsData = [
     {
@@ -135,109 +155,57 @@ const DashboardScreen = observer(({ navigation }) => {
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
-    
+
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays < 7) return `${diffDays}d ago`;
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
-  // Check for new customers and prompt download
-  const checkForNewCustomers = async () => {
+  // Check and download offline maps on app start if not available
+  const checkAndDownloadOfflineMaps = async () => {
     try {
-      // First check data integrity - if incomplete, prompt to continue download
-      const integrityCheck = await checkCustomerDataIntegrity();
-      console.log('[Dashboard] Customer data integrity check:', integrityCheck);
-      
-      if (!integrityCheck.complete && integrityCheck.missingChunks && integrityCheck.missingChunks.length > 0) {
-        console.log(`[Dashboard] ⚠️ Customer data incomplete - ${integrityCheck.loadedRecords || 0} records downloaded`);
-        // Show alert to inform user about incomplete data and offer to continue download
-        Alert.alert(
-          'Customer Data Incomplete',
-          `Download was interrupted. ${integrityCheck.loadedRecords || 0} records downloaded so far. Would you like to continue downloading the remaining data?`,
-          [
-            { 
-              text: 'Later', 
-              style: 'cancel',
-              onPress: () => console.log('[Dashboard] User chose to download later')
-            },
-            { 
-              text: 'Continue Download', 
-              onPress: () => {
-                console.log('[Dashboard] Continuing download of customer data...');
-                // Show download prompt which will trigger resume
-                dashboardStore.setShowDownloadPrompt(true);
-                dashboardStore.setResumeDownload(true);
-              }
-            }
-          ]
-        );
+      // Check if offline maps are already ready
+      if (MapStore.isReady) {
+        console.log('[Dashboard] Offline maps already downloaded');
         return;
       }
-      
-      // Check if download was completed successfully
-      const manifest = await AsyncStorage.getItem('allCustomers_manifest');
-      const cachedCount = await AsyncStorage.getItem('allCustomers_count');
-      
-      if (manifest && cachedCount) {
-        const manifestData = JSON.parse(manifest);
-        // Only skip if download was completed successfully
-        if (manifestData.status === 'complete') {
-          console.log('[Dashboard] Customer data already downloaded:', cachedCount, 'records');
-          return;
+
+      // Check if download is already in progress
+      if (MapStore.isDownloading || MapStore.isUnzipping) {
+        console.log('[Dashboard] Offline maps download already in progress');
+        return;
+      }
+
+      console.log('[Dashboard] Checking offline maps availability...');
+
+      // Automatically start downloading offline maps if not available
+      const MAP_URL = 'https://davao-water.gov.ph/dcwdApps/mobileApps/reactMap/davroad.zip';
+      console.log('[Dashboard] Starting offline maps download automatically...');
+      // Request notification permission and show a quick notification (if allowed)
+      try {
+        const hasPermission = await requestNotificationPermissions();
+        if (hasPermission) {
+          await showNotification('Offline Map', 'Starting offline map download');
+        } else {
+          console.log('[Dashboard] Notification permission not granted; proceeding without notification');
         }
+      } catch (err) {
+        console.log('[Dashboard] Notification helper error:', err);
       }
 
-      console.log('[Dashboard] No complete customer download found - showing prompt');
-      dashboardStore.setShowDownloadPrompt(true);
-    } catch (error) {
-      console.log('Error checking for new customers:', error);
-    }
-  };
+      await MapStore.initializeMap(MAP_URL);
+      console.log('[Dashboard] Offline maps download initiated');
 
-  // Handle download customers (supports both fresh download and resume)
-  const handleDownloadCustomers = async () => {
-    try {
-      dashboardStore.setIsDownloading(true);
-      dashboardStore.setDownloadProgress(0);
-      dashboardStore.setDownloadedRecords(0);
-
-      // Check if we should resume an incomplete download
-      if (dashboardStore.resumeDownload) {
-        console.log('[Dashboard] Resuming incomplete download...');
-        await resumeCustomerDownload((progress) => {
-          const percentage = typeof progress === 'object' ? progress.percentage : progress;
-          const current = typeof progress === 'object' ? progress.current : 0;
-          dashboardStore.setDownloadProgress(percentage || 0);
-          dashboardStore.setDownloadedRecords(current || 0);
-        });
-        dashboardStore.setResumeDownload(false); // Reset flag
-      } else {
-        // Fresh download
-        await preCacheCustomers((progress) => {
-          const percentage = typeof progress === 'object' ? progress.percentage : progress;
-          const current = typeof progress === 'object' ? progress.current : 0;
-          dashboardStore.setDownloadProgress(percentage || 0);
-          dashboardStore.setDownloadedRecords(current || 0);
-        });
+      // After successful download, enable offline map by default
+      if (MapStore.isReady) {
+        await AsyncStorage.setItem('@offline_map_enabled', 'true');
+        console.log('[Dashboard] Offline map preference saved as enabled');
       }
 
-      dashboardStore.setDownloadComplete(true);
-      dashboardStore.setIsDownloading(false);
-      dashboardStore.setDownloadProgress(100);
-      
-      setTimeout(() => {
-        dashboardStore.setShowDownloadPrompt(false);
-        dashboardStore.setDownloadComplete(false);
-        dashboardStore.setNewCustomersAvailable(false);
-        dashboardStore.setResumeDownload(false);
-        dashboardStore.setDownloadedRecords(0);
-      }, 2000);
     } catch (error) {
-      console.log('Error downloading customers:', error);
-      Alert.alert('Download Failed', error.message || 'Failed to download customer data. Please try again.');
-      dashboardStore.setIsDownloading(false);
-      dashboardStore.setResumeDownload(false);
+      console.log('[Dashboard] Error checking/downloading offline maps:', error);
+      // Don't show alert for map download errors as it's optional
     }
   };
 
@@ -272,7 +240,7 @@ const DashboardScreen = observer(({ navigation }) => {
       console.log('📍 Report structure:', Object.keys(report));
       console.log('📍 Full first report:', JSON.stringify(report, null, 2));
     }
-    
+
     return {
       id: report.id || index,
       title: `${report.refNo || 'N/A'}`,
@@ -336,7 +304,7 @@ const DashboardScreen = observer(({ navigation }) => {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1e5a8e" translucent />
-      
+
       {/* Header with Gradient */}
       <LinearGradient
         colors={['#1e5a8e', '#2d7ab8']}
@@ -365,7 +333,7 @@ const DashboardScreen = observer(({ navigation }) => {
             <Text style={{ color: '#6b7280', marginTop: 8 }}>Loading reports...</Text>
           </View>
         )}
-        
+
         {/* Offline Mode Banner - Only shows when offline */}
         {!offlineStore.isOnline && (
           <View style={styles.offlineModeBanner}>
@@ -374,7 +342,7 @@ const DashboardScreen = observer(({ navigation }) => {
             <Text style={styles.offlineModeBannerSubtext}>Using cached data</Text>
           </View>
         )}
-        
+
         {/* Quick Stats Summary */}
         {!dashboardStore.loadingReports && (
           <>
@@ -400,8 +368,8 @@ const DashboardScreen = observer(({ navigation }) => {
         {/* Stats Cards */}
         <View style={styles.statsContainer}>
           {statsData.map((stat) => (
-            <TouchableOpacity 
-              key={stat.id} 
+            <TouchableOpacity
+              key={stat.id}
               style={[styles.statCard, { borderLeftColor: stat.borderColor }]}
               activeOpacity={0.7}
               onPress={stat.onPress}
@@ -436,8 +404,8 @@ const DashboardScreen = observer(({ navigation }) => {
             </View>
           ) : recentActivity.length > 0 ? (
             recentActivity.map((activity) => (
-              <TouchableOpacity 
-                key={activity.id} 
+              <TouchableOpacity
+                key={activity.id}
                 style={styles.activityCard}
                 activeOpacity={0.7}
                 onPress={() => {
@@ -467,77 +435,6 @@ const DashboardScreen = observer(({ navigation }) => {
           )}
         </View>
       </ScrollView>
-
-      {/* Customer Download Prompt Modal */}
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={dashboardStore.showDownloadPrompt}
-        onRequestClose={() => !dashboardStore.isDownloading && dashboardStore.setShowDownloadPrompt(false)}
-      >
-        <View style={styles.downloadModalOverlay}>
-          <View style={styles.downloadModalContainer}>
-            {/* Modal Header */}
-            <View style={styles.downloadModalHeader}>
-              <View style={styles.downloadIconContainer}>
-                <Ionicons 
-                  name={dashboardStore.downloadComplete ? "checkmark-circle" : "cloud-download"} 
-                  size={48} 
-                  color={dashboardStore.downloadComplete ? "#4CAF50" : "#1e5a8e"} 
-                />
-              </View>
-              <Text style={styles.downloadModalTitle}>
-                {dashboardStore.downloadComplete ? "Download Complete!" : "New Customer Data Available"}
-              </Text>
-              <Text style={styles.downloadModalSubtitle}>
-                {dashboardStore.downloadComplete 
-                  ? "Customer data has been updated successfully"
-                  : "Updated customer data is available for download"}
-              </Text>
-            </View>
-
-            {/* Progress Bar */}
-            {dashboardStore.isDownloading && (
-              <View style={styles.progressContainer}>
-                <View style={styles.progressBar}>
-                  <View style={[styles.progressFill, { width: `${dashboardStore.downloadProgress}%` }]} />
-                </View>
-                <Text style={styles.progressText}>
-                  {dashboardStore.downloadedRecords > 0 
-                    ? `${dashboardStore.downloadedRecords.toLocaleString()} records`
-                    : 'Starting...'}
-                </Text>
-              </View>
-            )}
-
-            {/* Action Buttons */}
-            {!dashboardStore.downloadComplete && (
-              <View style={styles.downloadModalButtons}>
-                <TouchableOpacity
-                  style={[styles.downloadModalButton, styles.downloadCancelButton]}
-                  onPress={() => dashboardStore.setShowDownloadPrompt(false)}
-                  disabled={dashboardStore.isDownloading}
-                >
-                  <Text style={styles.downloadCancelButtonText}>
-                    {dashboardStore.isDownloading ? "Downloading..." : "Later"}
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.downloadModalButton, styles.downloadConfirmButton]}
-                  onPress={handleDownloadCustomers}
-                  disabled={dashboardStore.isDownloading}
-                >
-                  {dashboardStore.isDownloading ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text style={styles.downloadConfirmButtonText}>Download Now</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-        </View>
-      </Modal>
 
       {/* Report Details Modal */}
       <Modal
@@ -614,10 +511,10 @@ const DashboardScreen = observer(({ navigation }) => {
                     <View style={[styles.statusBadge, { backgroundColor: dashboardStore.selectedActivity.iconBg + '20' }]}>
                       <Text style={[styles.statusBadgeText, { color: dashboardStore.selectedActivity.iconBg }]}>
                         {dashboardStore.selectedActivity.dispatchStatus === 0 ? 'Pending' :
-                         dashboardStore.selectedActivity.dispatchStatus === 1 ? 'Dispatched' :
-                         dashboardStore.selectedActivity.dispatchStatus === 2 ? 'Repaired' :
-                         dashboardStore.selectedActivity.dispatchStatus === 3 ? 'Closed' :
-                         dashboardStore.selectedActivity.dispatchStatus === 4 ? 'Not Found' : 'Unknown'}
+                          dashboardStore.selectedActivity.dispatchStatus === 1 ? 'Dispatched' :
+                            dashboardStore.selectedActivity.dispatchStatus === 2 ? 'Repaired' :
+                              dashboardStore.selectedActivity.dispatchStatus === 3 ? 'Closed' :
+                                dashboardStore.selectedActivity.dispatchStatus === 4 ? 'Not Found' : 'Unknown'}
                       </Text>
                     </View>
                   </View>
@@ -625,64 +522,125 @@ const DashboardScreen = observer(({ navigation }) => {
 
                 {/* Action Buttons */}
                 <View style={styles.modalActions}>
-              <TouchableOpacity 
-                style={styles.modalActionButton}
-                onPress={() => {
-                  dashboardStore.setDetailsModalVisible(false);
-                  
-                  // Check if we have direct coordinates
-                  if (dashboardStore.selectedActivity.latitude && dashboardStore.selectedActivity.longitude) {
-                    navigation.navigate('Report', { 
-                      screen: 'ReportMap',
-                      params: { 
-                        refNo: dashboardStore.selectedActivity.title,
-                        latitude: dashboardStore.selectedActivity.latitude,
-                        longitude: dashboardStore.selectedActivity.longitude,
-                        location: dashboardStore.selectedActivity.location,
-                        meterNumber: dashboardStore.selectedActivity.meterNumber
-                      }
-                    });
-                  } 
-                  // Try to get coordinates from meter number if available
-                  else if (dashboardStore.selectedActivity.meterNumber) {
-                    Alert.alert(
-                      'Searching Location',
-                      'Looking up meter coordinates...',
-                      [{ text: 'OK' }]
-                    );
-                    
-                    // Navigate to Report tab with meter number to search
-                    navigation.navigate('Report', { 
-                      screen: 'ReportMap',
-                      params: { 
-                        meterNumber: dashboardStore.selectedActivity.meterNumber,
-                        refNo: dashboardStore.selectedActivity.title
-                      }
-                    });
-                  } 
-                  else {
-                    Alert.alert(
-                      'Location Unavailable',
-                      'GPS coordinates and meter information are not available for this report.',
-                      [{ text: 'OK' }]
-                    );
-                  }
-                }}
-              >
-                <Ionicons name="map" size={20} color="#fff" />
-                <Text style={styles.modalActionText}>View on Map</Text>
-              </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.modalActionButton}
+                    onPress={() => {
+                      dashboardStore.setDetailsModalVisible(false);
 
-              <TouchableOpacity 
-                style={[styles.modalActionButton, { backgroundColor: '#64748b' }]}
-                onPress={() => dashboardStore.setDetailsModalVisible(false)}
-              >
-                <Ionicons name="close" size={20} color="#fff" />
-                <Text style={styles.modalActionText}>Close</Text>
-              </TouchableOpacity>
+                      // Check if we have direct coordinates
+                      if (dashboardStore.selectedActivity.latitude && dashboardStore.selectedActivity.longitude) {
+                        navigation.navigate('Report', {
+                          screen: 'ReportMap',
+                          params: {
+                            refNo: dashboardStore.selectedActivity.title,
+                            latitude: dashboardStore.selectedActivity.latitude,
+                            longitude: dashboardStore.selectedActivity.longitude,
+                            location: dashboardStore.selectedActivity.location,
+                            meterNumber: dashboardStore.selectedActivity.meterNumber
+                          }
+                        });
+                      }
+                      // Try to get coordinates from meter number if available
+                      else if (dashboardStore.selectedActivity.meterNumber) {
+                        Alert.alert(
+                          'Searching Location',
+                          'Looking up meter coordinates...',
+                          [{ text: 'OK' }]
+                        );
+
+                        // Navigate to Report tab with meter number to search
+                        navigation.navigate('Report', {
+                          screen: 'ReportMap',
+                          params: {
+                            meterNumber: dashboardStore.selectedActivity.meterNumber,
+                            refNo: dashboardStore.selectedActivity.title
+                          }
+                        });
+                      }
+                      else {
+                        Alert.alert(
+                          'Location Unavailable',
+                          'GPS coordinates and meter information are not available for this report.',
+                          [{ text: 'OK' }]
+                        );
+                      }
+                    }}
+                  >
+                    <Ionicons name="map" size={20} color="#fff" />
+                    <Text style={styles.modalActionText}>View on Map</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.modalActionButton, { backgroundColor: '#64748b' }]}
+                    onPress={() => dashboardStore.setDetailsModalVisible(false)}
+                  >
+                    <Ionicons name="close" size={20} color="#fff" />
+                    <Text style={styles.modalActionText}>Close</Text>
+                  </TouchableOpacity>
                 </View>
               </ScrollView>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Download Progress Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={gisCustomerStore.isDownloading}
+        onRequestClose={() => { }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.detailsModalContainer, { height: 'auto', paddingVertical: 24 }]}>
+            <View style={{ alignItems: 'center', paddingHorizontal: 20 }}>
+              <ActivityIndicator size="large" color="#1e5a8e" style={{ marginBottom: 16 }} />
+              <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1e5a8e', marginBottom: 8 }}>
+                Downloading Customer Data
+              </Text>
+              <Text style={{ fontSize: 14, color: '#64748b', marginBottom: 16 }}>
+                {gisCustomerStore.downloadProgress}% Complete
+              </Text>
+              <View style={{ width: '100%', height: 8, backgroundColor: '#e2e8f0', borderRadius: 4, overflow: 'hidden' }}>
+                <View style={{ width: `${gisCustomerStore.downloadProgress}%`, height: '100%', backgroundColor: '#1e5a8e' }} />
+              </View>
+              <Text style={{ fontSize: 12, color: '#94a3b8', marginTop: 16, textAlign: 'center' }}>
+                {gisCustomerStore.downloadedRecords > 0 ? `${gisCustomerStore.downloadedRecords.toLocaleString()} records processed` : 'Please keep the app open...'}
+              </Text>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Download Complete Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={gisCustomerStore.downloadComplete}
+        onRequestClose={() => gisCustomerStore.setDownloadComplete(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.detailsModalContainer, { height: 'auto', paddingVertical: 24 }]}>
+            <View style={{ alignItems: 'center', paddingHorizontal: 20 }}>
+              <Ionicons name="checkmark-circle" size={64} color="#4CAF50" style={{ marginBottom: 16 }} />
+              <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1e5a8e', marginBottom: 8 }}>
+                Download Complete!
+              </Text>
+              <Text style={{ fontSize: 14, color: '#64748b', marginBottom: 24, textAlign: 'center' }}>
+                Customer data has been successfully downloaded and is ready for offline use.
+              </Text>
+              <TouchableOpacity
+                style={{
+                  backgroundColor: '#1e5a8e',
+                  paddingVertical: 12,
+                  paddingHorizontal: 32,
+                  borderRadius: 8,
+                }}
+                onPress={() => gisCustomerStore.setDownloadComplete(false)}
+              >
+                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>OK</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -707,7 +665,7 @@ const DashboardScreen = observer(({ navigation }) => {
                   <Text style={styles.allReportsSubtitle}>{dashboardStore.totalReports} total reports</Text>
                 </View>
               </View>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.allReportsCloseBtn}
                 onPress={() => dashboardStore.setAllReportsModalVisible(false)}
               >
@@ -716,14 +674,14 @@ const DashboardScreen = observer(({ navigation }) => {
             </View>
 
             {/* Reports List */}
-            <ScrollView 
+            <ScrollView
               style={styles.allReportsList}
               showsVerticalScrollIndicator={false}
             >
               {allReportsData.length > 0 ? (
                 allReportsData.map((report) => (
-                  <TouchableOpacity 
-                    key={report.id} 
+                  <TouchableOpacity
+                    key={report.id}
                     style={styles.allReportsItem}
                     activeOpacity={0.7}
                     onPress={() => {

@@ -105,38 +105,8 @@ export const fetchDmaCodes = async (forceRefresh = false) => {
 // Search offline customer data
 export const searchOfflineCustomers = async (searchValue) => {
   try {
-    if (!searchValue || searchValue.trim() === '') {
-      return [];
-    }
-    
-    const search = searchValue.trim().toLowerCase();
-    console.log(`🔍 Searching offline customer data for: "${search}"`);
-    
-    const customers = await getAvailableCustomers();
-    
-    if (customers.length === 0) {
-      console.log('⚠️ No offline customer data available for search');
-      return [];
-    }
-    
-    console.log(`📦 Searching through ${customers.length} offline records...`);
-    
-    // Search by meter number or account number (partial match)
-    const results = customers.filter(customer => {
-      const meterNumber = (customer.meterNumber || customer.meter_number || customer.MeterNumber || '').toString().toLowerCase();
-      const accountNumber = (customer.accountNumber || customer.account_number || customer.AccountNumber || '').toString().toLowerCase();
-      const address = (customer.address || customer.Address || '').toString().toLowerCase();
-      
-      return meterNumber.includes(search) || 
-             accountNumber.includes(search) ||
-             address.includes(search);
-    });
-    
-    // Limit results to prevent performance issues
-    const limitedResults = results.slice(0, 20);
-    
-    console.log(`✅ Found ${results.length} matches, returning ${limitedResults.length}`);
-    return limitedResults;
+    const GisCustomerInterceptor = require('./gisCustomerInterceptor').default;
+    return await GisCustomerInterceptor.searchCustomers(searchValue);
   } catch (error) {
     console.error('❌ Offline search error:', error);
     return [];
@@ -149,19 +119,19 @@ export const searchAccountOrMeter = async (searchValue, forceOffline = false) =>
     const netInfo = await import('@react-native-community/netinfo');
     const state = await netInfo.default.fetch();
     const isOnline = state.isConnected && state.isInternetReachable !== false;
-    
+
     if (!isOnline || forceOffline) {
       console.log('📴 Device offline - using offline customer search');
       const offlineResults = await searchOfflineCustomers(searchValue);
-      
+
       if (offlineResults.length > 0) {
         return { data: offlineResults, offline: true };
       }
-      
+
       // Return empty with offline flag
       return { data: [], offline: true, message: 'No matching customer found in offline data' };
     }
-    
+
     // Online search
     const res = await devApi.get('/admin/customer/SearchAccountOrMeterNumber', {
       params: { searchValue },
@@ -178,7 +148,7 @@ export const searchAccountOrMeter = async (searchValue, forceOffline = false) =>
     } catch (offlineErr) {
       console.error('Offline fallback also failed:', offlineErr);
     }
-    
+
     const status = err?.response?.status || err?.response?.data?.statusCode;
     const message = err?.response?.data?.message;
     if (status === 404 && message && message.toLowerCase().includes('no matching customer')) {
@@ -193,13 +163,13 @@ export const getAvailableCustomers = async () => {
   try {
     const chunkCount = await AsyncStorage.getItem('allCustomers_chunks');
     console.log('📦 Checking customer data - chunk count:', chunkCount);
-    
+
     if (chunkCount) {
       const chunks = parseInt(chunkCount);
       console.log(`📦 Loading ${chunks} chunks...`);
       let allCustomers = [];
       let missingChunks = [];
-      
+
       for (let i = 0; i < chunks; i++) {
         const chunk = await AsyncStorage.getItem(`allCustomers_chunk_${i}`);
         if (chunk) {
@@ -211,14 +181,14 @@ export const getAvailableCustomers = async () => {
           missingChunks.push(i);
         }
       }
-      
+
       // Report data integrity status
       if (missingChunks.length > 0) {
         console.warn(`⚠️ DATA INCOMPLETE: ${missingChunks.length} chunks missing out of ${chunks}`);
         console.warn(`⚠️ Missing chunks: ${missingChunks.slice(0, 10).join(', ')}${missingChunks.length > 10 ? '...' : ''}`);
         console.warn('⚠️ Please re-download customer data from Settings');
       }
-      
+
       if (allCustomers.length > 0) {
         console.log(`📦 Loaded ${allCustomers.length} customers from ${chunks} chunks (${missingChunks.length} missing)`);
         return allCustomers;
@@ -226,12 +196,12 @@ export const getAvailableCustomers = async () => {
         console.log('⚠️ Chunks exist but no data loaded');
       }
     }
-    
+
     const manifest = await AsyncStorage.getItem('allCustomers_manifest');
     const downloadCount = await AsyncStorage.getItem('allCustomers_download_count');
     console.log('📦 Manifest:', manifest ? 'exists' : 'none');
     console.log('📦 Download count:', downloadCount);
-    
+
     if (manifest) {
       const manifestData = JSON.parse(manifest);
       const pagesFetched = Array.isArray(manifestData.pagesFetched) ? manifestData.pagesFetched : [];
@@ -274,7 +244,7 @@ export const checkCustomerDataIntegrity = async () => {
     if (manifest) {
       const manifestData = JSON.parse(manifest);
       console.log('📋 Manifest status:', manifestData.status);
-      
+
       // If manifest says complete, verify by checking chunks
       if (manifestData.status === 'complete') {
         const chunkCount = await AsyncStorage.getItem('allCustomers_chunks');
@@ -288,16 +258,16 @@ export const checkCustomerDataIntegrity = async () => {
         }
       }
     }
-    
+
     const chunkCount = await AsyncStorage.getItem('allCustomers_chunks');
     if (!chunkCount || parseInt(chunkCount) === 0) {
       return { complete: false, reason: 'No data downloaded', totalChunks: 0, loadedRecords: 0 };
     }
-    
+
     const chunks = parseInt(chunkCount);
     let missingChunks = [];
     let totalRecords = 0;
-    
+
     // Check each chunk exists and count records
     for (let i = 0; i < chunks; i++) {
       const chunk = await AsyncStorage.getItem(`allCustomers_chunk_${i}`);
@@ -313,7 +283,7 @@ export const checkCustomerDataIntegrity = async () => {
         missingChunks.push(i);
       }
     }
-    
+
     if (missingChunks.length > 0) {
       return {
         complete: false,
@@ -323,7 +293,7 @@ export const checkCustomerDataIntegrity = async () => {
         loadedRecords: totalRecords,
       };
     }
-    
+
     // All chunks present - mark as complete
     return {
       complete: true,
@@ -377,7 +347,7 @@ export const checkForNewData = async () => {
         skipped: true
       };
     }
-    
+
     const cachedCount = await AsyncStorage.getItem('allCustomers_count');
     const localCount = parseInt(cachedCount) || 0;
     const res = await devApi.get('/admin/customer/paginate', {
@@ -411,16 +381,16 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
   const BATCH_SIZE = 5000; // Download 5000 records per batch
   const CHUNK_SIZE = 5000; // Save to AsyncStorage every 5,000 records
   const API_URL = 'https://api.davao-water.gov.ph/dcwd-gis/api/v1/admin/customer/all';
-  
+
   try {
     console.log('📥 Starting batched customer data download...');
-    
+
     // Check if user is authenticated
     const token = await AsyncStorage.getItem('token');
     if (!token) {
       throw new Error('Authentication required. Please log in first.');
     }
-    
+
     // Check if we already have cached data and not forcing refresh
     if (!forceRefresh) {
       const manifest = await AsyncStorage.getItem('allCustomers_manifest');
@@ -432,7 +402,7 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
         }
       }
     }
-    
+
     // Initialize download
     let currentChunkData = [];
     let currentChunkIndex = 0;
@@ -440,19 +410,19 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
     let currentPage = 1;
     let hasMore = true;
     let estimatedTotal = 0;
-    
+
     // Mark download as in progress
     await safeSetItem('allCustomers_manifest', JSON.stringify({
       status: 'in-progress',
       startedAt: new Date().toISOString(),
       batchSize: BATCH_SIZE,
     }));
-    
+
     while (hasMore) {
       try {
         const offset = (currentPage - 1) * BATCH_SIZE;
         console.log(`📦 Fetching batch ${currentPage} (offset: ${offset})...`);
-        
+
         // Fetch batch from API with pagination
         const response = await devApi.get(API_URL, {
           params: {
@@ -462,24 +432,24 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
           },
           timeout: 120000, // 2 minute timeout per batch
         });
-        
+
         const batchData = response?.data?.data || response?.data || [];
         const records = Array.isArray(batchData) ? batchData : (batchData.records || batchData.customers || []);
-        
+
         // Try to get total count from response
         if (currentPage === 1) {
           estimatedTotal = response?.data?.total || response?.data?.count || response?.data?.totalRecords || 280000;
           console.log(`📊 Estimated total records: ${estimatedTotal}`);
         }
-        
+
         console.log(`✅ Batch ${currentPage} received: ${records.length} records`);
-        
+
         if (records.length === 0) {
           hasMore = false;
           console.log('📊 No more records to fetch');
           break;
         }
-        
+
         // Handle API returning all data at once (no pagination support)
         if (currentPage === 1 && records.length > 50000) {
           console.log(`📊 API returned ${records.length} records in single response - saving in chunks...`);
@@ -488,7 +458,7 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
             const chunk = records.slice(i, i + CHUNK_SIZE);
             await safeSetItem(`allCustomers_chunk_${chunkIndex}`, JSON.stringify(chunk));
             chunkIndex++;
-            
+
             // Update progress
             if (onProgress) {
               onProgress({
@@ -498,7 +468,7 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
               });
             }
           }
-          
+
           await safeSetItem('allCustomers_chunks', chunkIndex.toString());
           await safeSetItem('allCustomers_count', records.length.toString());
           await safeSetItem('allCustomers_timestamp', new Date().toISOString());
@@ -511,32 +481,32 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
           console.log(`✅ All ${records.length} customer records saved in ${chunkIndex} chunks`);
           return true;
         }
-        
+
         // Add records to current chunk buffer
         for (const record of records) {
           currentChunkData.push(record);
           totalRecords++;
-          
+
           // Save chunk when buffer is full
           if (currentChunkData.length >= CHUNK_SIZE) {
             console.log(`💾 Saving chunk ${currentChunkIndex} (${currentChunkData.length} records)...`);
             await safeSetItem(`allCustomers_chunk_${currentChunkIndex}`, JSON.stringify(currentChunkData));
-            
+
             // Update chunk count immediately after saving
             await safeSetItem('allCustomers_chunks', (currentChunkIndex + 1).toString());
             await safeSetItem('allCustomers_count', totalRecords.toString());
-            
+
             currentChunkIndex++;
             currentChunkData = [];
           }
         }
-        
+
         // Report progress - use batch-based progress since we don't know actual total
         if (onProgress) {
           // If we got less than BATCH_SIZE, we're on the last batch
           const isLastBatch = records.length < BATCH_SIZE;
           let percentage;
-          
+
           if (isLastBatch) {
             percentage = 100; // We're done!
           } else if (estimatedTotal > 0 && estimatedTotal > totalRecords) {
@@ -546,7 +516,7 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
             // Fallback: increment by smaller amounts per batch
             percentage = Math.min(95, currentPage * 2);
           }
-          
+
           onProgress({
             current: totalRecords,
             total: estimatedTotal || totalRecords,
@@ -554,7 +524,7 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
             percentage,
           });
         }
-        
+
         // Check if we received less than batch size (indicates last page)
         if (records.length < BATCH_SIZE) {
           hasMore = false;
@@ -564,10 +534,10 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
           // Small delay between batches
           await new Promise(resolve => setTimeout(resolve, 300));
         }
-        
+
       } catch (batchError) {
         console.error(`❌ Error fetching batch ${currentPage}:`, batchError.message);
-        
+
         // Save any remaining data in buffer
         if (currentChunkData.length > 0) {
           console.log(`💾 Saving partial chunk ${currentChunkIndex} (${currentChunkData.length} records) before stopping...`);
@@ -576,7 +546,7 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
           await safeSetItem('allCustomers_count', totalRecords.toString());
           currentChunkIndex++;
         }
-        
+
         // Update manifest as partial
         await safeSetItem('allCustomers_manifest', JSON.stringify({
           status: 'partial',
@@ -586,7 +556,7 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
           lastBatch: currentPage,
           error: batchError.message,
         }));
-        
+
         if (totalRecords > 0) {
           console.warn(`⚠️ Download stopped with ${totalRecords} records saved. Can be resumed.`);
           throw new Error(`Download interrupted at ${totalRecords} records. You can continue downloading later.`);
@@ -595,16 +565,16 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
         }
       }
     }
-    
+
     // Save any remaining data in buffer
     if (currentChunkData.length > 0) {
       console.log(`💾 Saving final chunk ${currentChunkIndex} (${currentChunkData.length} records)...`);
       await safeSetItem(`allCustomers_chunk_${currentChunkIndex}`, JSON.stringify(currentChunkData));
       currentChunkIndex++;
     }
-    
+
     console.log(`✅ Download complete: ${totalRecords} total customers in ${currentChunkIndex} chunks`);
-    
+
     // Save final metadata
     await safeSetItem('allCustomers_chunks', currentChunkIndex.toString());
     await safeSetItem('allCustomers_count', totalRecords.toString());
@@ -616,24 +586,24 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
       totalChunks: currentChunkIndex,
       batches: currentPage,
     }));
-    
+
     if (onProgress) {
       onProgress({ current: totalRecords, total: totalRecords, percentage: 100 });
     }
-    
+
     console.log('💾 Customer data cached successfully');
     return true;
-    
+
   } catch (error) {
     console.error('❌ fetchAllCustomers error:', error.message || error);
-    
+
     // Mark as failed in manifest
     await safeSetItem('allCustomers_manifest', JSON.stringify({
       status: 'failed',
       failedAt: new Date().toISOString(),
       error: error.message,
     }));
-    
+
     // Provide user-friendly error messages
     if (error.response?.status === 401) {
       throw new Error('Session expired. Please log out and log in again.');
@@ -642,7 +612,7 @@ export const fetchAllCustomers = async (forceRefresh = false, onProgress = null,
     } else if (isStorageFullError(error)) {
       throw new Error('Storage is full. Please clear some space and try again.');
     }
-    
+
     throw error;
   }
 };
@@ -652,45 +622,47 @@ export const resumeCustomerDownload = async (onProgress = null, opts = {}) => {
   const BATCH_SIZE = 5000;
   const CHUNK_SIZE = 5000;
   const API_URL = 'https://api.davao-water.gov.ph/dcwd-gis/api/v1/admin/customer/all';
-  
+
   try {
     console.log('🔄 Resuming customer data download...');
-    
+
     // Check authentication
     const token = await AsyncStorage.getItem('token');
     if (!token) {
       throw new Error('Authentication required. Please log in first.');
     }
-    
+
     // Check current download status
     const integrityCheck = await checkCustomerDataIntegrity();
     console.log('📊 Current integrity status:', integrityCheck);
-    
+
     if (integrityCheck.complete) {
       console.log('✅ Data already complete, no resume needed');
       if (onProgress) onProgress({ current: integrityCheck.totalRecords, percentage: 100 });
       return true;
     }
-    
+
     // Get how many records we already have
     const existingRecords = integrityCheck.loadedRecords || 0;
-    const existingChunks = integrityCheck.totalChunks || 0;
+    // This was the bug: it was using the total declared chunks, not the count of chunks actually present.
+    const numPresentChunks = (integrityCheck.totalChunks || 0) - (integrityCheck.missingChunks?.length || 0);
+    const existingChunks = numPresentChunks;
     const estimatedTotal = 280000; // Estimated total
-    
+
     console.log(`📊 Resuming from: ${existingRecords} records, ${existingChunks} chunks`);
-    
+
     // Calculate starting point
     let currentChunkIndex = existingChunks;
     let totalRecords = existingRecords;
     let currentChunkData = [];
-    
+
     // Calculate API offset - we need to start from exactly where we left off
     const startOffset = existingRecords;
     let currentPage = Math.floor(startOffset / BATCH_SIZE) + 1;
     let hasMore = true;
-    
+
     console.log(`📥 Starting from page ${currentPage}, offset ${startOffset}...`);
-    
+
     // Update manifest to show resuming
     await safeSetItem('allCustomers_manifest', JSON.stringify({
       status: 'resuming',
@@ -698,12 +670,12 @@ export const resumeCustomerDownload = async (onProgress = null, opts = {}) => {
       resumedFromRecords: existingRecords,
       resumedFromChunks: existingChunks,
     }));
-    
+
     while (hasMore) {
       try {
         const offset = (currentPage - 1) * BATCH_SIZE;
         console.log(`📦 Fetching batch ${currentPage} (offset: ${offset})...`);
-        
+
         const response = await devApi.get(API_URL, {
           params: {
             limit: BATCH_SIZE,
@@ -712,23 +684,23 @@ export const resumeCustomerDownload = async (onProgress = null, opts = {}) => {
           },
           timeout: 120000, // 2 minute timeout
         });
-        
+
         const batchData = response?.data?.data || response?.data || [];
         const records = Array.isArray(batchData) ? batchData : (batchData.records || batchData.customers || []);
-        
+
         console.log(`✅ Batch ${currentPage} received: ${records.length} records`);
-        
+
         if (records.length === 0) {
           hasMore = false;
           console.log('📊 No more records to fetch');
           break;
         }
-        
+
         // Add records to buffer and save chunks when full
         for (const record of records) {
           currentChunkData.push(record);
           totalRecords++;
-          
+
           if (currentChunkData.length >= CHUNK_SIZE) {
             console.log(`💾 Saving chunk ${currentChunkIndex} (${currentChunkData.length} records)...`);
             await safeSetItem(`allCustomers_chunk_${currentChunkIndex}`, JSON.stringify(currentChunkData));
@@ -738,12 +710,12 @@ export const resumeCustomerDownload = async (onProgress = null, opts = {}) => {
             currentChunkData = [];
           }
         }
-        
+
         // Report progress - use batch-based detection for completion
         if (onProgress) {
           const isLastBatch = records.length < BATCH_SIZE;
           let percentage;
-          
+
           if (isLastBatch) {
             percentage = 100;
           } else if (estimatedTotal > 0 && estimatedTotal > totalRecords) {
@@ -751,7 +723,7 @@ export const resumeCustomerDownload = async (onProgress = null, opts = {}) => {
           } else {
             percentage = Math.min(95, currentPage * 2);
           }
-          
+
           onProgress({
             current: totalRecords,
             total: estimatedTotal || totalRecords,
@@ -759,7 +731,7 @@ export const resumeCustomerDownload = async (onProgress = null, opts = {}) => {
             resumed: true,
           });
         }
-        
+
         // Check if last batch
         if (records.length < BATCH_SIZE) {
           hasMore = false;
@@ -768,10 +740,10 @@ export const resumeCustomerDownload = async (onProgress = null, opts = {}) => {
           currentPage++;
           await new Promise(resolve => setTimeout(resolve, 300));
         }
-        
+
       } catch (batchError) {
         console.error(`❌ Error fetching batch ${currentPage}:`, batchError.message);
-        
+
         // Save remaining buffer
         if (currentChunkData.length > 0) {
           console.log(`💾 Saving partial chunk ${currentChunkIndex} before stopping...`);
@@ -780,7 +752,7 @@ export const resumeCustomerDownload = async (onProgress = null, opts = {}) => {
           await safeSetItem('allCustomers_count', totalRecords.toString());
           currentChunkIndex++;
         }
-        
+
         // Update manifest as partial
         await safeSetItem('allCustomers_manifest', JSON.stringify({
           status: 'partial',
@@ -788,20 +760,20 @@ export const resumeCustomerDownload = async (onProgress = null, opts = {}) => {
           totalRecords,
           totalChunks: currentChunkIndex,
         }));
-        
+
         throw new Error(`Download paused at ${totalRecords} records. You can continue later.`);
       }
     }
-    
+
     // Save remaining data
     if (currentChunkData.length > 0) {
       console.log(`💾 Saving final chunk ${currentChunkIndex} (${currentChunkData.length} records)...`);
       await safeSetItem(`allCustomers_chunk_${currentChunkIndex}`, JSON.stringify(currentChunkData));
       currentChunkIndex++;
     }
-    
+
     console.log(`✅ Resume complete: ${totalRecords} total customers in ${currentChunkIndex} chunks`);
-    
+
     // Save final metadata
     await safeSetItem('allCustomers_chunks', currentChunkIndex.toString());
     await safeSetItem('allCustomers_count', totalRecords.toString());
@@ -813,13 +785,13 @@ export const resumeCustomerDownload = async (onProgress = null, opts = {}) => {
       totalChunks: currentChunkIndex,
       resumed: true,
     }));
-    
+
     if (onProgress) {
       onProgress({ current: totalRecords, total: totalRecords, percentage: 100 });
     }
-    
+
     return true;
-    
+
   } catch (error) {
     console.error('❌ resumeCustomerDownload error:', error.message || error);
     throw error;
@@ -829,7 +801,7 @@ export const resumeCustomerDownload = async (onProgress = null, opts = {}) => {
 export const preCacheCustomers = async (onProgress = null, opts = {}) => {
   try {
     console.log('🔄 Pre-caching customer data...');
-    
+
     // Clear any corrupted old customer data first
     console.log('🧹 Clearing old customer data chunks...');
     const keys = await AsyncStorage.getAllKeys();
@@ -838,10 +810,10 @@ export const preCacheCustomers = async (onProgress = null, opts = {}) => {
       await AsyncStorage.multiRemove(chunkKeys);
       console.log(`🧹 Removed ${chunkKeys.length} old chunks`);
     }
-    
+
     // Also clear metadata
     await AsyncStorage.multiRemove(['allCustomers_chunks', 'allCustomers_count', 'allCustomers_manifest', 'allCustomers_timestamp']);
-    
+
     await fetchAllCustomers(true, onProgress, opts);
     console.log('✓ Customer data pre-cached successfully');
     return true;
@@ -904,13 +876,13 @@ export const fetchLeakReports = async (empId) => {
     });
     const responseData = res?.data?.data || res?.data || {};
     console.log('✅ Full API Response:', JSON.stringify(res.data, null, 2));
-    
+
     // Debug: Log first report structure to find coordinate fields
     if (responseData.reports && responseData.reports.length > 0) {
       console.log('📍 First report keys:', Object.keys(responseData.reports[0]));
       console.log('📍 First report full data:', JSON.stringify(responseData.reports[0], null, 2));
     }
-    
+
     console.log('✅ Leak reports fetched:', {
       totalCount: responseData.totalCount || 0,
       reportedCount: responseData.reportedCount || 0,
@@ -987,23 +959,23 @@ const getCoveringId = (covering) => {
 export const submitLeakReport = async (reportData) => {
   try {
     console.log('📤 Submitting leak report:', reportData);
-    
+
     // Get user data for reporter info
     const userData = await AsyncStorage.getItem('userData');
     const user = userData ? JSON.parse(userData) : {};
-    
+
     console.log('🔍 Extracting meter data:', {
       meterNumber: reportData.meterData?.meterNumber,
       accountNumber: reportData.meterData?.accountNumber,
       processed: (reportData.meterData?.accountNumber || '').replace(/\D/g, '').slice(-6)
     });
-    
+
     // Build geometry string - coordinates is the LEAK location (may differ from meter)
     const longitude = reportData.coordinates?.longitude || 125.598699;
     const latitude = reportData.coordinates?.latitude || 7.060698;
     const geomString = `${longitude}, ${latitude}`;
     const wktPoint = `POINT(${longitude} ${latitude})`; // WKT format for GIS
-    
+
     // Log meter vs leak location for debugging
     console.log('📍 Leak Location (Geom):', { longitude, latitude, geomString });
     if (reportData.meterCoordinates) {
@@ -1015,7 +987,7 @@ export const submitLeakReport = async (reportData) => {
     if (reportData.leakLocationMethod) {
       console.log('📍 Leak location method:', reportData.leakLocationMethod);
     }
-    
+
     // Map frontend fields to backend expected fields
     const mappedData = {
       // Required fields
@@ -1029,7 +1001,7 @@ export const submitLeakReport = async (reportData) => {
       JmsCode: reportData.dma || '', // Use DMA code as JMS code fallback
       ReporterName: `${user.fName || ''} ${user.mName || ''} ${user.lName || ''}`.trim() || reportData.contactName || '', // Use logged-in user's full name
       EmpId: user.empId || user.employeeId || '', // Add employee ID who created the report
-      
+
       // Optional fields
       LeakTypeId: getLeakTypeId(reportData.leakType),
       geom: geomString, // IMPORTANT: lowercase 'geom' (database column name)
@@ -1045,37 +1017,37 @@ export const submitLeakReport = async (reportData) => {
       empId: user.empId || user.employeeId || '', // IMPORTANT: lowercase 'empId'
       ReportedBy: user.empId || user.employeeId || '', // NEW: ReportedBy field
     };
-    
+
     console.log('📋 Mapped data for submission:', mappedData);
-    
+
     // Use FormData (multipart/form-data) as backend expects
     const formData = new FormData();
-    
+
     // String fields - use camelCase to match backend model
-  formData.append('ReportedLocation', mappedData.ReportedLocation || '');
-  formData.append('ReportedLandmark', mappedData.ReportedLandmark || '');
-  formData.append('ReporterName', mappedData.ReporterName || '');
-  formData.append('Geom', geomString || '');
-  formData.append('RefNo', mappedData.RefNo || '');
-  formData.append('ReferenceMtr', mappedData.ReferenceMtr || '');
-  formData.append('ReportedNumber', mappedData.ReportedNumber || '');
-  formData.append('ReferenceRecaddrs', mappedData.ReferenceRecaddrs || '');
-  formData.append('DmaCode', mappedData.DmaCode || '');
-  formData.append('JmsCode', mappedData.JmsCode || '');
-  formData.append('ReportedBy', mappedData.ReportedBy || '');
-  formData.append('DtReported', mappedData.DtReported || '');
-  formData.append('DtReceived', mappedData.DtReceived || '');
-  formData.append('LeakTypeId', mappedData.LeakTypeId || 0);
-  formData.append('LeakCovering', mappedData.LeakCovering || 0);
-  formData.append('Priority', mappedData.Priority || 0);
-  formData.append('ReportType', mappedData.ReportType || 0);
-  formData.append('DispatchStat', 0); // Always 0 (Pending) - status changed from web only
-  formData.append('LeakIndicator', mappedData.LeakIndicator || 0);
-  formData.append('LeakLocation', mappedData.LeakLocation || 0);
-  formData.append('ReporterType', mappedData.ReporterType || 0);
-  
-  console.log('📤 DispatchStat being sent:', 0, '(Pending)');
-    
+    formData.append('ReportedLocation', mappedData.ReportedLocation || '');
+    formData.append('ReportedLandmark', mappedData.ReportedLandmark || '');
+    formData.append('ReporterName', mappedData.ReporterName || '');
+    formData.append('Geom', geomString || '');
+    formData.append('RefNo', mappedData.RefNo || '');
+    formData.append('ReferenceMtr', mappedData.ReferenceMtr || '');
+    formData.append('ReportedNumber', mappedData.ReportedNumber || '');
+    formData.append('ReferenceRecaddrs', mappedData.ReferenceRecaddrs || '');
+    formData.append('DmaCode', mappedData.DmaCode || '');
+    formData.append('JmsCode', mappedData.JmsCode || '');
+    formData.append('ReportedBy', mappedData.ReportedBy || '');
+    formData.append('DtReported', mappedData.DtReported || '');
+    formData.append('DtReceived', mappedData.DtReceived || '');
+    formData.append('LeakTypeId', mappedData.LeakTypeId || 0);
+    formData.append('LeakCovering', mappedData.LeakCovering || 0);
+    formData.append('Priority', mappedData.Priority || 0);
+    formData.append('ReportType', mappedData.ReportType || 0);
+    formData.append('DispatchStat', 0); // Always 0 (Pending) - status changed from web only
+    formData.append('LeakIndicator', mappedData.LeakIndicator || 0);
+    formData.append('LeakLocation', mappedData.LeakLocation || 0);
+    formData.append('ReporterType', mappedData.ReporterType || 0);
+
+    console.log('📤 DispatchStat being sent:', 0, '(Pending)');
+
     // Image files - properly format for React Native FormData
     if (reportData.leakPhotos && reportData.leakPhotos.length > 0) {
       reportData.leakPhotos.forEach((photoUri, index) => {
@@ -1092,7 +1064,7 @@ export const submitLeakReport = async (reportData) => {
         }
       });
     }
-    
+
     if (reportData.landmarkPhoto) {
       const fileName = reportData.landmarkPhoto.split('/').pop();
       const fileType = fileName.split('.').pop();
@@ -1103,9 +1075,9 @@ export const submitLeakReport = async (reportData) => {
       });
       console.log('📸 Appended LandmarkImage:', fileName);
     }
-    
+
     console.log('✅ FormData prepared with camelCase field names to match backend model');
-    
+
     // Log all FormData entries for debugging
     console.log('📋 FormData contents being sent:');
     if (formData._parts) {
@@ -1117,9 +1089,9 @@ export const submitLeakReport = async (reportData) => {
         }
       });
     }
-    
+
     console.log('📤 Sending FormData to backend (multipart/form-data)');
-    
+
     try {
       const res = await devApi.post(
         '/admin/LeakDetection/LeakDetectionReport',
@@ -1147,12 +1119,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { handleSessionExpiry } from './autoLogout';
 
 // API Base URL
-export const API_BASE = 'https://api.davao-water.gov.ph/dcwd-gis/api/v1';
+export const API_BASE = 'https://dev-api.davao-water.gov.ph/dcwd-gis/api/v1';
 
 // Create axios instance
 export const devApi = axios.create({
   baseURL: API_BASE,
-  headers: { 
+  headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
     'User-Agent': 'LeakDetectionApp/1.0',
@@ -1208,8 +1180,8 @@ devApi.interceptors.response.use(
 
       try {
         const refreshToken = await AsyncStorage.getItem('refresh_token');
-        const { data } = await axios.post(`${API_BASE}/auth/refresh`, { 
-          token: refreshToken 
+        const { data } = await axios.post(`${API_BASE}/auth/refresh`, {
+          token: refreshToken
         });
 
         const newToken = data.accessToken || data.token;
@@ -1217,7 +1189,7 @@ devApi.interceptors.response.use(
 
         processQueue(null, newToken);
         originalRequest.headers.Authorization = `Bearer ${newToken}`;
-        
+
         return devApi(originalRequest);
       } catch (err) {
         processQueue(err, null);

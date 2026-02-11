@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
 
 const STORAGE_KEY = 'app_notifications';
 
@@ -44,5 +45,37 @@ export const clearNotifications = async () => {
   } catch (err) {
     console.error('clearNotifications error', err);
     return [];
+  }
+};
+
+export const requestNotificationPermissions = async () => {
+  try {
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
+
+    if (existingStatus !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+
+    return finalStatus === 'granted';
+  } catch (error) {
+    console.log('Notifications not available:', error.message);
+    return false;
+  }
+};
+
+export const showNotification = async (title, body, progress = null) => {
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+        data: { progress },
+      },
+      trigger: null,
+    });
+  } catch (error) {
+    console.log('Notification not shown:', error.message);
   }
 };

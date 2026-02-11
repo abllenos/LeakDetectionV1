@@ -8,30 +8,39 @@ import {
   ActivityIndicator,
   StatusBar,
   Modal,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { API_BASE } from '../services/interceptor';
-import { logout, preCacheCustomers, getAvailableCustomers } from '../services/interceptor';
+import { logout } from '../services/interceptor';
 import { stopLocationTracking } from '../services/locationTracker';
 import { forceCheckNewData } from '../services/dataChecker';
 import updateChecker from '../services/updateChecker';
 import VersionCheck from 'react-native-version-check';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { observer } from 'mobx-react-lite';
-import { useSettingsStore, useOfflineStore } from '../stores/RootStore';
+import { useSettingsStore, useOfflineStore, useDownloadStore } from '../stores/RootStore';
+import MapStore from '../stores/MapStore';
 import NotificationBanner from '../components/NotificationBanner';
 import { useFocusEffect } from '@react-navigation/native';
 import styles from '../styles/SettingsStyles';
+import GisCustomerInterceptor from '../services/gisCustomerInterceptor';
+
+const MAP_URL = 'https://davao-water.gov.ph/dcwdApps/mobileApps/reactMap/davroad.zip';
+const OFFLINE_MAP_KEY = '@offline_map_enabled';
 
 const SettingsScreen = observer(({ navigation }) => {
   const store = useSettingsStore();
+  const downloadStore = useDownloadStore();
   const offlineStore = useOfflineStore();
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [appVersion, setAppVersion] = useState('');
   const [buildNumber, setBuildNumber] = useState('');
+  const [useOfflineMap, setUseOfflineMap] = useState(false);
+  const [customerCount, setCustomerCount] = useState(0);
 
   // Get app version on mount
   useEffect(() => {
@@ -46,6 +55,33 @@ const SettingsScreen = observer(({ navigation }) => {
       setBuildNumber(Constants.expoConfig?.android?.versionCode || '1');
     }
   }, []);
+
+  // Load offline map preference
+  useEffect(() => {
+    loadOfflineMapPreference();
+  }, []);
+
+  const loadOfflineMapPreference = async () => {
+    try {
+      const savedPreference = await AsyncStorage.getItem(OFFLINE_MAP_KEY);
+      if (savedPreference !== null) {
+        setUseOfflineMap(savedPreference === 'true');
+      }
+    } catch (error) {
+      console.log('Error loading offline map preference:', error);
+    }
+  };
+
+  const toggleOfflineMap = async (value) => {
+    try {
+      setUseOfflineMap(value);
+      await AsyncStorage.setItem(OFFLINE_MAP_KEY, value.toString());
+      console.log('Offline map preference saved:', value);
+    } catch (error) {
+      console.log('Error saving offline map preference:', error);
+      Alert.alert('Error', 'Failed to save settings');
+    }
+  };
 
   // Helper function to calculate remaining time before auto-logout
   const getRemainingTimeText = () => {
@@ -63,20 +99,25 @@ const SettingsScreen = observer(({ navigation }) => {
     return `${hours}h ${minutes}m`;
   };
 
-  // Check if customer data is cached on mount and poll during download
+  // Check customer data status
+  const checkCustomerStatus = async () => {
+    const count = await GisCustomerInterceptor.getCustomerCount();
+    setCustomerCount(count);
+  };
+
   useEffect(() => {
-    store.checkCachedData();
+    checkCustomerStatus();
     store.loadPreset();
 
     const interval = setInterval(() => {
-      if (store.clientLoading) store.checkCachedData();
-    }, 3000);
+      checkCustomerStatus();
+    }, 2000);
     return () => clearInterval(interval);
-  }, [store]);
+  }, []);
 
   useFocusEffect(
     React.useCallback(() => {
-      store.checkCachedData();
+      checkCustomerStatus();
     }, [])
   );
 
@@ -91,9 +132,125 @@ const SettingsScreen = observer(({ navigation }) => {
 
   const cancelLogout = () => store.setLogoutModalVisible(false);
 
-  const handleClearCache = () => {
-    // Use the store's modal-based clear cache flow
-    store.setClearCacheModalVisible(true);
+  const handleDownloadMap = async () => {
+    Alert.alert(
+      'Download Map',
+      'This will download the offline map in the background. You can continue using your device.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
+        {
+          text: 'Download',
+          onPress: async () => {
+            await requestNotificationPermissions();
+            await showNotification(
+              '📥 Map Download Started',
+              'Downloading Davao Roads offline map...'
+            );
+
+            // Start download in background
+            MapStore.initializeMap(MAP_URL, showNotification);
+          }
+        }
+      ]
+    );
+  };
+
+  const handleClearMap = async () => {
+    Alert.alert(
+      'Clear Map Data',
+      'This will delete all downloaded map files. You will need to download again to use offline maps.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            await MapStore.clearMapData();
+            await showNotification(
+              '🗑️ Map Data Cleared',
+              'All offline map data has been removed.'
+            );
+          }
+        }
+      ]
+    );
+  };
+
+  const requestNotificationPermissions = async () => {
+    try {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+
+      if (finalStatus !== 'granted') {
+        console.log('Notification permissions not granted, will show in-app progress only');
+      }
+    } catch (error) {
+      console.log('Notifications not available:', error.message);
+    }
+  };
+
+  const showNotification = async (title, body, progress = null) => {
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title,
+          body,
+          data: { progress },
+        },
+        trigger: null, // Show immediately
+      });
+    } catch (error) {
+      console.log('Notification not shown:', error.message);
+      // Silently fail - app will still show progress in-app
+    }
+  };
+
+  const getMapStatusText = () => {
+    if (MapStore.isReady) return 'Downloaded';
+    if (MapStore.isDownloading || MapStore.isUnzipping) return 'Downloading...';
+    return 'Not Downloaded';
+  };
+
+  const getMapStatusColor = () => {
+    if (MapStore.isReady) return '#d1fae5';
+    if (MapStore.isDownloading || MapStore.isUnzipping) return '#fef3c7';
+    return '#fee2e2';
+  };
+
+  const getMapStatusTextColor = () => {
+    if (MapStore.isReady) return '#059669';
+    if (MapStore.isDownloading || MapStore.isUnzipping) return '#d97706';
+    return '#dc2626';
+  };
+
+  const handleClearCustomers = async () => {
+    Alert.alert(
+      'Clear Customer Data',
+      'Are you sure you want to delete all offline customer data?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            await GisCustomerInterceptor.clearDatabase();
+            setCustomerCount(0);
+            checkCustomerStatus();
+          }
+        }
+      ]
+    );
   };
 
   return (
@@ -120,68 +277,70 @@ const SettingsScreen = observer(({ navigation }) => {
           </View>
 
           <View style={styles.row}>
-            <Text style={styles.label}>Tiles Cached:</Text>
-            <View style={styles.statusBadge}>
-              <Text style={styles.statusText}>{store.mapsStatus}</Text>
+            <Text style={styles.label}>Map Status:</Text>
+            <View style={[styles.statusBadge, { backgroundColor: getMapStatusColor() }]}>
+              <Text style={[styles.statusText, { color: getMapStatusTextColor() }]}>
+                {getMapStatusText()}
+              </Text>
             </View>
           </View>
 
           <View style={styles.row}>
             <Text style={styles.label}>Current Mode:</Text>
-            <View style={[styles.statusBadge, { backgroundColor: offlineStore.isOnline ? '#d1fae5' : '#fee2e2' }]}>
-              <Text style={[styles.statusText, { color: offlineStore.isOnline ? '#059669' : '#dc2626' }]}> 
-                {offlineStore.isOnline ? 'Using Online Tiles' : (store.cachedTiles > 0 ? 'Using Offline Tiles' : 'No Connection')}
+            <View style={[styles.statusBadge, { backgroundColor: (offlineStore.isOnline && !useOfflineMap) ? '#d1fae5' : (useOfflineMap && MapStore.isReady ? '#d1fae5' : '#fee2e2') }]}>
+              <Text style={[styles.statusText, { color: (offlineStore.isOnline && !useOfflineMap) ? '#059669' : (useOfflineMap && MapStore.isReady ? '#059669' : '#dc2626') }]}>
+                {useOfflineMap && MapStore.isReady ? 'Using Offline Tiles' : (offlineStore.isOnline ? 'Using Online Tiles' : 'No Connection')}
               </Text>
             </View>
           </View>
 
-          <View style={styles.rowBetween}>
-            <View>
-              <Text style={styles.smallLabel}>Cached Tiles:</Text>
-              <Text style={styles.valueText}>{store.cachedTiles}</Text>
+          {/* Offline Map Toggle - Only show when map is ready */}
+          {MapStore.isReady && !MapStore.isDownloading && !MapStore.isUnzipping && (
+            <View style={styles.row}>
+              <Text style={styles.label}>Use Offline Map</Text>
+              <Switch
+                value={useOfflineMap}
+                onValueChange={toggleOfflineMap}
+                trackColor={{ false: '#d1d1d6', true: '#34C759' }}
+                thumbColor={useOfflineMap ? '#fff' : '#f4f3f4'}
+                ios_backgroundColor="#d1d1d6"
+              />
             </View>
-            <View>
-              <Text style={styles.smallLabel}>Storage Used:</Text>
-              <Text style={styles.valueText}>{store.storageUsed} MB</Text>
-            </View>
-          </View>
+          )}
 
-          {store.mapsLoading || store.mapsPaused ? (
+          {/* Download Progress */}
+          {(MapStore.isDownloading || MapStore.isUnzipping) && (
             <View style={{ marginTop: 16 }}>
               <View style={styles.progressBarBackground}>
-                <View style={[styles.progressBarFill, { width: `${store.updateProgress}%` }]} />
+                <View style={[styles.progressBarFill, { width: `${MapStore.downloadProgress}%` }]} />
               </View>
               <Text style={styles.progressText}>
-                {store.updateProgress}% - {store.cachedTiles.toLocaleString()} tiles ({store.storageUsed} MB)
+                {MapStore.statusMessage}
               </Text>
-              {store.mapsDownloadSpeed > 0 && (
-                <Text style={styles.speedText}>{store.mapsDownloadSpeed} tiles/sec {store.mapsPaused && '(Paused)'}</Text>
-              )}
-              <View style={styles.actionsRow}>
-                <TouchableOpacity
-                  style={[styles.primaryBtn, store.mapsPaused && { backgroundColor: '#10b981' }]}
-                  onPress={() => { if (store.mapsPaused) store.resumeMapDownload(); else store.pauseMapDownload(); }}
-                >
-                  <Ionicons name={store.mapsPaused ? 'play' : 'pause'} size={18} color="#fff" style={{ marginRight: 8 }} />
-                  <Text style={styles.primaryBtnText}>{store.mapsPaused ? 'Resume' : 'Pause'}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.outlineBtn} onPress={() => store.cancelMapDownload && store.cancelMapDownload()}>
-                  <Text style={styles.outlineBtnText}>Cancel</Text>
-                </TouchableOpacity>
-              </View>
+
             </View>
-          ) : null}
+          )}
 
-          {store.updateSuccess && (<Text style={styles.successText}>Maps updated successfully ✅</Text>)}
-
-          {!store.mapsLoading && !store.mapsPaused && !store.updateSuccess && (
-            <TouchableOpacity style={styles.primaryBtnFull} onPress={() => store.startMapDownload && store.startMapDownload()}>
-              <Text style={styles.primaryBtnText}>Update Maps</Text>
+          {/* Download Map Button */}
+          {!MapStore.isDownloading && !MapStore.isUnzipping && (
+            <TouchableOpacity
+              style={styles.primaryBtnFull}
+              onPress={handleDownloadMap}
+            >
+              <Ionicons name="download-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.primaryBtnText}>
+                {MapStore.isReady ? 'Re-download Map' : 'Download Map'}
+              </Text>
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity style={styles.outlineBtnFullSpaced} onPress={handleClearCache}>
-            <Text style={styles.outlineBtnText}>Clear Cache</Text>
+          {/* Clear Map Button */}
+          <TouchableOpacity
+            style={[styles.outlineBtnFullSpaced, !MapStore.isReady && { opacity: 0.5 }]}
+            onPress={handleClearMap}
+            disabled={!MapStore.isReady || MapStore.isDownloading || MapStore.isUnzipping}
+          >
+            <Text style={styles.outlineBtnText}>Clear Map Data</Text>
           </TouchableOpacity>
         </View>
 
@@ -195,59 +354,33 @@ const SettingsScreen = observer(({ navigation }) => {
           <View style={styles.rowBetween}>
             <View>
               <Text style={styles.smallLabel}>Cached Records:</Text>
-              <Text style={styles.valueText}>{store.clientRecordCount || 0}</Text>
+              <Text style={styles.valueText}>{customerCount.toLocaleString()}</Text>
             </View>
             <View>
               <Text style={styles.smallLabel}>Status:</Text>
-              <Text style={[styles.valueText, store.clientDataIncomplete && { color: '#f59e0b' }]}>
-                {store.clientDataIncomplete ? 'Incomplete' : (store.clientRecordCount > 0 ? 'Downloaded' : 'Not Available')}
+              <Text style={styles.valueText}>
+                {customerCount > 0 ? 'Downloaded' : 'Not Available'}
               </Text>
             </View>
           </View>
 
-          {/* Warning for incomplete data */}
-          {store.clientDataIncomplete && (
-            <View style={styles.incompleteDataWarning}>
-              <Ionicons name="warning" size={16} color="#f59e0b" />
-              <View style={{ flex: 1, marginLeft: 8 }}>
-                <Text style={styles.incompleteDataTitle}>Data Incomplete</Text>
-                <Text style={styles.incompleteDataText}>
-                  Download was interrupted. Tap below to continue downloading the remaining data.
-                </Text>
-                <TouchableOpacity 
-                  style={styles.redownloadButton}
-                  onPress={() => store.clearAndRedownloadCustomerData()}
-                  disabled={store.clientLoading || store.clientDeleting}
-                >
-                  <Ionicons name="play" size={14} color="#fff" />
-                  <Text style={styles.redownloadButtonText}>Continue Download</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-
-          <TouchableOpacity 
-            style={[styles.clearDataButton, store.clientDeleting && styles.clearDataButtonDisabled]} 
-            onPress={() => store.clearCustomerData()}
-            disabled={store.clientDeleting}
-            activeOpacity={0.7}
-          >
-            <LinearGradient
-              colors={store.clientDeleting ? ['#9ca3af', '#6b7280'] : ['#ef4444', '#dc2626']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.clearDataGradient}
+          {customerCount > 0 && (
+            <TouchableOpacity
+              style={styles.clearDataButton}
+              onPress={handleClearCustomers}
+              activeOpacity={0.7}
             >
-              {store.clientDeleting ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="trash-outline" size={20} color="#fff" />
-                  <Text style={styles.clearDataButtonText}>Clear Customer Data</Text>
-                </>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
+              <LinearGradient
+                colors={['#ef4444', '#dc2626']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.clearDataGradient}
+              >
+                <Ionicons name="trash-outline" size={20} color="#fff" />
+                <Text style={styles.clearDataButtonText}>Clear Customer Data</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Offline Queue Card */}
@@ -317,9 +450,9 @@ const SettingsScreen = observer(({ navigation }) => {
           )}
 
           <View style={styles.actionsRow}>
-            <TouchableOpacity 
-              style={[styles.primaryBtn, { flex: 1 }]} 
-              onPress={() => offlineStore.startSync()} 
+            <TouchableOpacity
+              style={[styles.primaryBtn, { flex: 1 }]}
+              onPress={() => offlineStore.startSync()}
               disabled={!offlineStore.isOnline || offlineStore.isSyncing || offlineStore.pendingCount === 0}
             >
               {offlineStore.isSyncing ? (
@@ -332,8 +465,8 @@ const SettingsScreen = observer(({ navigation }) => {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity 
-              style={styles.outlineBtn} 
+            <TouchableOpacity
+              style={styles.outlineBtn}
               onPress={() => offlineStore.retryFailed()}
               disabled={offlineStore.failedCount === 0 || offlineStore.isSyncing}
             >
@@ -342,16 +475,16 @@ const SettingsScreen = observer(({ navigation }) => {
           </View>
 
           {(offlineStore.pendingCount > 0 || offlineStore.failedCount > 0) && (
-            <TouchableOpacity 
-              style={[styles.outlineBtnFull, { borderColor: '#ef4444', marginTop: 8 }]} 
+            <TouchableOpacity
+              style={[styles.outlineBtnFull, { borderColor: '#ef4444', marginTop: 8 }]}
               onPress={() => {
                 Alert.alert(
                   'Clear Queue',
                   'Are you sure you want to clear all pending and failed items? This action cannot be undone.',
                   [
                     { text: 'Cancel', style: 'cancel' },
-                    { 
-                      text: 'Clear', 
+                    {
+                      text: 'Clear',
                       style: 'destructive',
                       onPress: () => offlineStore.clearAllQueue()
                     }
@@ -379,7 +512,7 @@ const SettingsScreen = observer(({ navigation }) => {
             <Text style={styles.metaLabel}>Last Updated</Text>
             <Text style={styles.metaValue}>{new Date().toLocaleDateString()}</Text>
           </View>
-          
+
           {/* Check for Updates Button */}
           <TouchableOpacity
             style={[styles.outlineBtn, { marginTop: 15, borderColor: '#3b82f6', opacity: checkingUpdate ? 0.6 : 1 }]}
@@ -432,37 +565,7 @@ const SettingsScreen = observer(({ navigation }) => {
         <View style={{ height: 80 }} />
       </ScrollView>
 
-      {/* Clear Cache Modal */}
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={store.clearCacheModalVisible}
-        onRequestClose={() => store.setClearCacheModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <View style={styles.modalIconContainer}>
-              <LinearGradient colors={[ '#f97316', '#f43f5e' ]} style={styles.modalIconGradient}>
-                <Ionicons name="trash-outline" size={34} color="#fff" />
-              </LinearGradient>
-            </View>
-            <Text style={styles.modalTitle}>Clear Map Cache</Text>
-            <Text style={styles.modalMessage}>This will remove all offline map tiles cached on your device. You can re-download them later.</Text>
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => store.setClearCacheModalVisible(false)} disabled={store.clearingCache}>
-                <Text style={styles.modalCancelText}>{store.clearingCache ? 'Please wait' : 'Cancel'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalConfirmBtn, { borderColor: '#f97316' }]} onPress={store.confirmClearCache.bind(store)} disabled={store.clearingCache}>
-                <LinearGradient colors={[ '#f97316', '#f43f5e' ]} style={styles.modalConfirmGradient}>
-                  {store.clearingCache ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalConfirmText}>Clear Cache</Text>}
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-      {/* Update Maps Modal fully removed; progress now shown in card */}
+      {/* Logout Modal */}
       <Modal
         animationType="fade"
         transparent={true}
@@ -492,16 +595,16 @@ const SettingsScreen = observer(({ navigation }) => {
 
             {/* Buttons */}
             <View style={styles.modalButtons}>
-              <TouchableOpacity 
-                style={styles.modalCancelBtn} 
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
                 onPress={cancelLogout}
                 activeOpacity={0.7}
               >
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity 
-                style={styles.modalConfirmBtn} 
+              <TouchableOpacity
+                style={styles.modalConfirmBtn}
                 onPress={confirmLogout}
                 activeOpacity={0.7}
               >

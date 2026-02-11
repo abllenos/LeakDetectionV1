@@ -114,7 +114,7 @@ export class SettingsStore {
       confirmDeleteClientData: action,
       clearCustomerData: action,
       confirmClearCustomerData: action,
-      clearAndRedownloadCustomerData: action,
+      resumeCustomerDataDownload: action,
       clearAllStorageData: action,
       confirmClearAllStorage: action,
       downloadClientData: action,
@@ -221,7 +221,7 @@ export class SettingsStore {
   async checkCachedData() {
     try {
       console.log('🔍 SettingsStore: Checking cached data...');
-      
+
       // Don't override values if map download is in progress
       if (this.mapsLoading) {
         console.log('🔍 Map download in progress, skipping cached data check for maps');
@@ -231,13 +231,13 @@ export class SettingsStore {
         if (tilesAvailable) {
           const tileCount = await getCachedTileCount();
           const storage = await calculateStorageUsed();
-          
+
           runInAction(() => {
             this.cachedTiles = tileCount;
             this.storageUsed = parseFloat(storage.toFixed(2));
             this.mapsStatus = 'Offline Tiles Available';
           });
-          
+
           console.log(`📍 Offline maps: ${tileCount} tiles, ${storage.toFixed(2)} MB`);
         } else {
           runInAction(() => {
@@ -245,15 +245,15 @@ export class SettingsStore {
             this.storageUsed = 0;
             this.mapsStatus = 'No Offline Tiles';
           });
-          
+
           console.log('📍 No offline maps available');
         }
       }
-      
+
       // Check customer data integrity first
       const integrityCheck = await checkCustomerDataIntegrity();
       console.log('📊 Customer data integrity:', integrityCheck);
-      
+
       if (!integrityCheck.complete && integrityCheck.missingChunks) {
         console.warn(`⚠️ Customer data incomplete: ${integrityCheck.missingChunks.length} chunks missing`);
         runInAction(() => {
@@ -264,7 +264,7 @@ export class SettingsStore {
         });
         return;
       }
-      
+
       if (integrityCheck.complete) {
         console.log(`✅ Customer data complete: ${integrityCheck.totalRecords} records`);
         runInAction(() => {
@@ -275,19 +275,19 @@ export class SettingsStore {
         });
         return;
       }
-      
+
       // Fallback to checking manifest/chunk metadata
       const chunkCount = await AsyncStorage.getItem('allCustomers_chunks');
       const cachedCount = await AsyncStorage.getItem('allCustomers_count');
       const manifest = await AsyncStorage.getItem('allCustomers_manifest');
-      
+
       console.log(`📊 Customer data check - chunks: ${chunkCount}, count: ${cachedCount}, manifest exists: ${!!manifest}`);
-      
+
       if (manifest) {
         try {
           const manifestData = JSON.parse(manifest);
           console.log(`📋 Manifest status: ${manifestData.status}, totalRecords: ${manifestData.totalRecords}`);
-          
+
           if (manifestData.status === 'complete' && manifestData.totalRecords) {
             console.log(`✅ Download complete: ${manifestData.totalRecords} customers available`);
             runInAction(() => {
@@ -298,7 +298,7 @@ export class SettingsStore {
             });
             return;
           }
-          
+
           if (manifestData.status === 'in-progress') {
             const recordsSoFar = manifestData.totalRecords || 0;
             console.log(`📥 Download in progress: ${recordsSoFar} customers downloaded`);
@@ -312,7 +312,7 @@ export class SettingsStore {
           console.warn('Failed to parse manifest:', e);
         }
       }
-      
+
       // Fallback to old metadata keys
       if (chunkCount && cachedCount) {
         const count = parseInt(cachedCount);
@@ -323,7 +323,7 @@ export class SettingsStore {
         });
         return;
       }
-      
+
       console.log('⚠️ No customer data found');
       runInAction(() => {
         this.clientDataAvailable = false;
@@ -372,7 +372,7 @@ export class SettingsStore {
       try {
         const data = JSON.parse(metadata);
         const expectedTiles = calculateTileCount();
-        
+
         // If we have all tiles downloaded, don't re-download
         if (data.totalTiles >= expectedTiles && data.downloadComplete === true) {
           console.log(`[OfflineMaps] Download already complete: ${data.totalTiles} tiles`);
@@ -416,7 +416,7 @@ export class SettingsStore {
             lastUpdate = now;
             lastCount = progress.current;
           }
-          
+
           // Update progress with real-time values from download progress
           runInAction(() => {
             this.updateProgress = progress.percentage;
@@ -429,14 +429,14 @@ export class SettingsStore {
         () => this.mapsPaused, // Pass pause check function
         () => this.mapsCancelled // Pass cancel check function
       );
-      
+
       // Check if download was cancelled
       if (this.mapsCancelled) {
         console.log('[OfflineMaps] Download was cancelled');
         // State already updated in cancelMapDownload, just return
         return;
       }
-      
+
       // Final update - only if not cancelled
       const tileCount = await getCachedTileCount();
       const storage = await calculateStorageUsed();
@@ -477,13 +477,13 @@ export class SettingsStore {
     this.mapsPaused = false;
     this.mapsDownloadSpeed = 0;
     this.updateProgress = 0;
-    
+
     // Update status based on current cache
     const tileCount = await getCachedTileCount();
     const storage = await calculateStorageUsed();
     this.cachedTiles = tileCount;
     this.storageUsed = parseFloat(storage.toFixed(2));
-    
+
     // Remove completion flag so download can be resumed
     const metadata = await AsyncStorage.getItem('offline_tiles_metadata');
     if (metadata) {
@@ -495,13 +495,13 @@ export class SettingsStore {
         console.warn('[OfflineMaps] Failed to update metadata after cancel');
       }
     }
-    
+
     if (tileCount > 0) {
       this.mapsStatus = 'Offline Tiles Available (Partial)';
     } else {
       this.mapsStatus = 'No Offline Tiles';
     }
-    
+
     console.log('[OfflineMaps] Download canceled');
   }
 
@@ -514,11 +514,11 @@ export class SettingsStore {
     runInAction(() => {
       this.clearingCache = true;
     });
-    
+
     try {
       const success = await clearTileCache();
       console.log('[OfflineMaps] Clear cache result:', success);
-      
+
       runInAction(() => {
         if (success) {
           this.cachedTiles = 0;
@@ -528,7 +528,7 @@ export class SettingsStore {
         this.clearingCache = false;
         this.clearCacheModalVisible = false;
       });
-      
+
       if (success) {
         Alert.alert('Cache Cleared', 'Offline map cache has been removed.');
       } else {
@@ -554,7 +554,7 @@ export class SettingsStore {
       await AsyncStorage.removeItem('allCustomers');
       await AsyncStorage.removeItem('allCustomers_timestamp');
       console.log('✓ Cleared customer cache');
-      
+
       this.clientDataAvailable = false;
       this.clientDeleting = false;
       this.clientLoading = false;
@@ -573,8 +573,8 @@ export class SettingsStore {
       'This will remove all cached customer data. You can re-download it from the dashboard when needed.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Clear', 
+        {
+          text: 'Clear',
           style: 'destructive',
           onPress: () => this.confirmClearCustomerData()
         }
@@ -586,12 +586,12 @@ export class SettingsStore {
     this.clientDeleting = true;
     try {
       console.log('🗑️ Clearing all customer data chunks...');
-      
+
       // Get all storage keys
       const allKeys = await AsyncStorage.getAllKeys();
-      
+
       // Filter customer-related keys
-      const customerKeys = allKeys.filter(key => 
+      const customerKeys = allKeys.filter(key =>
         key.startsWith('allCustomers_chunk_') ||
         key === 'allCustomers_manifest' ||
         key === 'allCustomers_count' ||
@@ -600,22 +600,22 @@ export class SettingsStore {
         key === 'allCustomers_download_count' ||
         key === 'allCustomers' // Legacy single-file storage
       );
-      
+
       console.log(`📦 Found ${customerKeys.length} customer data keys to remove`);
-      
+
       if (customerKeys.length > 0) {
         await AsyncStorage.multiRemove(customerKeys);
         console.log('✅ All customer data cleared successfully');
       }
-      
+
       runInAction(() => {
         this.clientDataAvailable = false;
         this.clientRecordCount = 0;
         this.clientDeleting = false;
       });
-      
+
       Alert.alert(
-        'Success', 
+        'Success',
         `Cleared ${customerKeys.length} customer data items. You can re-download from the dashboard.`,
         [{ text: 'OK' }]
       );
@@ -629,17 +629,17 @@ export class SettingsStore {
   }
 
   // Resume downloading incomplete customer data (continues from where it left off)
-  async clearAndRedownloadCustomerData() {
-    console.log('🔄 Starting resume download process...');
+  async resumeCustomerDataDownload() {
+    console.log('🔄 Starting customer data resume process...');
     this.clientLoading = true;
     this.clientProgress = 0;
-    
+
     try {
       runInAction(() => {
         this.clientDataIncomplete = false;
         this.clientMissingChunks = 0;
       });
-      
+
       // Resume download from where it left off
       console.log('📥 Resuming customer data download...');
       await resumeCustomerDownload(
@@ -655,17 +655,17 @@ export class SettingsStore {
           }
         }
       );
-      
+
       runInAction(() => {
         this.clientLoading = false;
         this.clientSuccess = true;
         this.clientProgress = 100;
       });
-      
+
       console.log('✓ Customer data download resumed and completed successfully');
       await this.checkCachedData();
       Alert.alert('Download Complete', 'Customer data download completed successfully!');
-      
+
     } catch (error) {
       console.error('❌ Failed to resume customer data download:', error);
       runInAction(() => {
@@ -684,8 +684,8 @@ export class SettingsStore {
       'This will remove ALL cached data including offline customer data, download progress, and settings. Your login credentials will be preserved. This action cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Clear All', 
+        {
+          text: 'Clear All',
           style: 'destructive',
           onPress: () => this.confirmClearAllStorage()
         }
@@ -696,29 +696,29 @@ export class SettingsStore {
   async confirmClearAllStorage() {
     try {
       console.log('🗑️ Clearing all AsyncStorage data...');
-      
+
       const allKeys = await AsyncStorage.getAllKeys();
       console.log(`📦 Found ${allKeys.length} storage keys`);
-      
+
       const keysToPreserve = ['savedUsername', 'savedPassword', 'rememberMe', 'authToken', 'refreshToken', 'userData'];
       const keysToRemove = allKeys.filter(key => !keysToPreserve.includes(key));
-      
+
       console.log(`🔒 Preserving ${keysToPreserve.length} authentication keys`);
       console.log(`🗑️ Removing ${keysToRemove.length} data keys`);
-      
+
       await AsyncStorage.multiRemove(keysToRemove);
-      
+
       console.log('✅ Storage cleared successfully');
-      
+
       this.clientDataAvailable = false;
       this.clientRecordCount = 0;
       this.clientLoading = false;
       this.clientProgress = 0;
       this.cachedTiles = 0;
       this.storageUsed = 0;
-      
+
       Alert.alert(
-        'Success', 
+        'Success',
         `Cleared ${keysToRemove.length} storage items. Your login credentials are preserved.`,
         [{ text: 'OK', onPress: () => this.checkCachedData() }]
       );
@@ -732,7 +732,7 @@ export class SettingsStore {
     // Check if there's existing data
     const cachedCount = await AsyncStorage.getItem('allCustomers_count');
     this.isDownloadingUpdate = !!(cachedCount && parseInt(cachedCount) > 0);
-    
+
     this.clientModalVisible = true;
     this.clientProgress = 0;
     this.clientSuccess = false;
@@ -770,13 +770,13 @@ export class SettingsStore {
         },
         presetOpts()
       );
-      
+
       this.clientLoading = false;
       this.clientSuccess = true;
       this.clientProgress = 100;
       this.isDownloadingUpdate = false;
       console.log('✓ Customer data downloaded successfully (background)');
-      
+
       await this.checkCachedData();
       Alert.alert('Download complete', 'Offline client data is ready');
     } catch (error) {
@@ -792,15 +792,15 @@ export class SettingsStore {
     try {
       console.log('🔍 Manually checking for data updates...');
       const result = await forceCheckNewData();
-      
+
       if (result) {
         Alert.alert(
           result.title,
           result.message,
           [
             { text: 'Later', style: 'cancel' },
-            { 
-              text: 'Download Now', 
+            {
+              text: 'Download Now',
               onPress: () => this.downloadClientData()
             }
           ]

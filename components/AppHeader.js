@@ -8,12 +8,6 @@ import { useIsFocused } from '@react-navigation/native';
 import { observer } from 'mobx-react-lite';
 import { useDownloadStore, useOfflineStore } from '../stores/RootStore';
 import { hasOfflineTiles } from '../services/offlineTileManager';
-import { 
-  startCustomerDownload, 
-  isDownloadInProgress, 
-  setProgressCallback, 
-  setCompletionCallback 
-} from '../services/downloadService';
 
 const AppHeader = observer(({ left, title, subtitle, right, showDownload = true }) => {
   const downloadStore = useDownloadStore();
@@ -55,76 +49,11 @@ const AppHeader = observer(({ left, title, subtitle, right, showDownload = true 
     return () => { mounted = false; clearInterval(iv); };
   }, [isFocused]);
 
-  // Set up callbacks for the download service when component mounts
-  useEffect(() => {
-    // Set progress callback
-    setProgressCallback((percent) => {
-      downloadStore.updateProgress(percent);
-    });
-
-    // Set completion callback
-    setCompletionCallback((result) => {
-      if (result.success) {
-        downloadStore.completeDownload(result.message);
-        timeoutRef.current = setTimeout(() => downloadStore.clearStatusMsg(), 3000);
-      } else {
-        downloadStore.failDownload(result.message);
-        timeoutRef.current = setTimeout(() => downloadStore.clearStatusMsg(), 4000);
-      }
-    });
-
-    // Check if download is already in progress (from another screen)
-    if (isDownloadInProgress() && !downloadStore.downloading) {
-      downloadStore.startDownload('Downloading client data...');
-    }
-  }, []);
-
   useEffect(() => {
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
   }, []);
-
-  const startDownload = async () => {
-    // Check if already downloading (either in store or in service)
-    if (downloadStore.downloading || isDownloadInProgress()) {
-      console.log('[AppHeader] Download already in progress');
-      return;
-    }
-    
-    downloadStore.startDownload('Starting client download...');
-
-    try {
-      // Read preset from storage and map to opts (fallback to fast)
-      let preset = 'fast';
-      try {
-        const p = await AsyncStorage.getItem('download_preset');
-        if (p) preset = p;
-      } catch (e) {
-        // ignore
-      }
-
-      const mapPreset = (pr) => {
-        switch (pr) {
-          case 'safe': return { pageSize: 500, concurrency: 2 };
-          case 'normal': return { pageSize: 1000, concurrency: 4 };
-          case 'fast':
-          default:
-            return { pageSize: 2000, concurrency: 6 };
-        }
-      };
-
-      const opts = mapPreset(preset);
-
-      // Use the download service - this runs independently of component lifecycle
-      await startCustomerDownload(opts);
-      
-      // Note: completion is handled by the callback set in useEffect
-    } catch (err) {
-      console.warn('Background download failed', err);
-      // Error handling is done by the callback
-    }
-  };
 
   return (
     <>
@@ -144,23 +73,12 @@ const AppHeader = observer(({ left, title, subtitle, right, showDownload = true 
           </View>
           <View style={styles.right}>
             {right || (
-              showDownload ? (
-                <TouchableOpacity onPress={startDownload} style={{ padding: 6, flexDirection: 'row', alignItems: 'center' }}>
-                  <Ionicons name={downloadStore.downloading ? 'download' : 'download-outline'} size={22} color="#fff" />
-                  {downloadStore.statusBadge && typeof downloadStore.statusBadge.percent === 'number' ? (
-                    <View style={{ marginLeft: 6, backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 }}>
-                      <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>{downloadStore.statusBadge.percent}%</Text>
-                    </View>
-                  ) : null}
-                </TouchableOpacity>
-              ) : (
-                <View style={{ width: 44 }} />
-              )
+              <View style={{ width: 44 }} />
             )}
           </View>
         </LinearGradient>
       </SafeAreaView>
-      
+
       {/* Offline Banner */}
       {!offlineStore.isOnline && (
         <View style={styles.offlineBanner}>
@@ -170,7 +88,7 @@ const AppHeader = observer(({ left, title, subtitle, right, showDownload = true 
           </Text>
         </View>
       )}
-      
+
       {/* Syncing Banner */}
       {offlineStore.isSyncing && (
         <View style={styles.syncingBanner}>
