@@ -19,7 +19,6 @@ import { observer } from 'mobx-react-lite';
 import { useDashboardStore, useOfflineStore, useDownloadStore, useGisCustomerStore } from '../stores/RootStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapStore from '../stores/MapStore';
-import { requestNotificationPermissions, showNotification } from '../services/notifications';
 import styles from '../styles/DashboardStyles';
 import GisCustomerInterceptor from '../services/gisCustomerInterceptor';
 
@@ -215,17 +214,6 @@ const DashboardScreen = observer(({ navigation }) => {
       // Automatically start downloading offline maps if not available
       const MAP_URL = 'https://davao-water.gov.ph/dcwdApps/mobileApps/reactMap/davroad.zip';
       console.log('[Dashboard] Starting offline maps download automatically...');
-      // Request notification permission and show a quick notification (if allowed)
-      try {
-        const hasPermission = await requestNotificationPermissions();
-        if (hasPermission) {
-          await showNotification('Offline Map', 'Starting offline map download');
-        } else {
-          console.log('[Dashboard] Notification permission not granted; proceeding without notification');
-        }
-      } catch (err) {
-        console.log('[Dashboard] Notification helper error:', err);
-      }
 
       await MapStore.initializeMap(MAP_URL);
       console.log('[Dashboard] Offline maps download initiated');

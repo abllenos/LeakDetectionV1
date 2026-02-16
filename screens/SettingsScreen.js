@@ -144,14 +144,8 @@ const SettingsScreen = observer(({ navigation }) => {
         {
           text: 'Download',
           onPress: async () => {
-            await requestNotificationPermissions();
-            await showNotification(
-              '📥 Map Download Started',
-              'Downloading Davao Roads offline map...'
-            );
-
             // Start download in background
-            MapStore.initializeMap(MAP_URL, showNotification);
+            MapStore.initializeMap(MAP_URL);
           }
         }
       ]
@@ -172,48 +166,10 @@ const SettingsScreen = observer(({ navigation }) => {
           style: 'destructive',
           onPress: async () => {
             await MapStore.clearMapData();
-            await showNotification(
-              '🗑️ Map Data Cleared',
-              'All offline map data has been removed.'
-            );
           }
         }
       ]
     );
-  };
-
-  const requestNotificationPermissions = async () => {
-    try {
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      let finalStatus = existingStatus;
-
-      if (existingStatus !== 'granted') {
-        const { status } = await Notifications.requestPermissionsAsync();
-        finalStatus = status;
-      }
-
-      if (finalStatus !== 'granted') {
-        console.log('Notification permissions not granted, will show in-app progress only');
-      }
-    } catch (error) {
-      console.log('Notifications not available:', error.message);
-    }
-  };
-
-  const showNotification = async (title, body, progress = null) => {
-    try {
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title,
-          body,
-          data: { progress },
-        },
-        trigger: null, // Show immediately
-      });
-    } catch (error) {
-      console.log('Notification not shown:', error.message);
-      // Silently fail - app will still show progress in-app
-    }
   };
 
   const getMapStatusText = () => {
