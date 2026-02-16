@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import AppHeader from '../components/AppHeader';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator } from 'react-native';
 import { startPeriodicDataCheck, stopPeriodicDataCheck } from '../services/dataChecker';
 import { observer } from 'mobx-react-lite';
@@ -21,6 +21,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapStore from '../stores/MapStore';
 import { requestNotificationPermissions, showNotification } from '../services/notifications';
 import styles from '../styles/DashboardStyles';
+import GisCustomerInterceptor from '../services/gisCustomerInterceptor';
 
 const DashboardScreen = observer(({ navigation }) => {
   const dashboardStore = useDashboardStore();
@@ -28,6 +29,11 @@ const DashboardScreen = observer(({ navigation }) => {
   const gisCustomerStore = useGisCustomerStore();
   const offlineStore = useOfflineStore();
   const dataCheckIntervalRef = useRef(null);
+
+  const [isGisDownloading, setIsGisDownloading] = useState(false);
+  const [gisDownloadProgress, setGisDownloadProgress] = useState(0);
+  const [gisTotalRecords, setGisTotalRecords] = useState(0);
+  const [gisDownloadComplete, setGisDownloadComplete] = useState(false);
 
   useEffect(() => {
     console.log('[Dashboard] Component mounted, loading data...');
@@ -42,10 +48,10 @@ const DashboardScreen = observer(({ navigation }) => {
         }
 
         // Check customer data status for offline access
-        await gisCustomerStore.checkCustomerDataStatus();
+        // await gisCustomerStore.checkCustomerDataStatus();
         // Check for updates and prompt if needed
         if (offlineStore.isOnline) {
-          gisCustomerStore.checkForUpdates();
+          checkGisDownload();
         }
         dashboardStore.setInitialLoadComplete(true);
         console.log('[Dashboard] Initial data load complete');
@@ -74,10 +80,10 @@ const DashboardScreen = observer(({ navigation }) => {
       if (offlineStore.isOnline) {
         dashboardStore.loadLeakReports();
         // Check for updates and prompt if needed
-        gisCustomerStore.checkForUpdates();
+        checkGisDownload();
       }
       // Re-check customer data status
-      gisCustomerStore.checkCustomerDataStatus();
+      // gisCustomerStore.checkCustomerDataStatus();
     });
 
     return () => {
@@ -89,6 +95,33 @@ const DashboardScreen = observer(({ navigation }) => {
       console.log('[Dashboard] Component unmounted');
     };
   }, [offlineStore.isOnline]);
+
+  const checkGisDownload = async () => {
+    try {
+      await GisCustomerInterceptor.checkAndPromptDownload(() => startGisDownload());
+    } catch (error) {
+      console.log('Error checking GIS download:', error);
+    }
+  };
+
+  const startGisDownload = async () => {
+    setIsGisDownloading(true);
+    try {
+      const result = await GisCustomerInterceptor.downloadAndSaveCustomers((progress, totalPages, totalRecords) => {
+        setGisDownloadProgress(progress);
+        setGisTotalRecords(totalRecords);
+      });
+      if (result.success) {
+        setGisDownloadComplete(true);
+      } else {
+        Alert.alert('Download Error', result.error || 'Failed to download customer data.');
+      }
+    } catch (error) {
+      Alert.alert('Download Error', 'Failed to download customer data.');
+    } finally {
+      setIsGisDownloading(false);
+    }
+  };
 
   const statsData = [
     {
@@ -588,7 +621,7 @@ const DashboardScreen = observer(({ navigation }) => {
       <Modal
         animationType="fade"
         transparent={true}
-        visible={gisCustomerStore.isDownloading}
+        visible={isGisDownloading}
         onRequestClose={() => { }}
       >
         <View style={styles.modalOverlay}>
@@ -599,13 +632,13 @@ const DashboardScreen = observer(({ navigation }) => {
                 Downloading Customer Data
               </Text>
               <Text style={{ fontSize: 14, color: '#64748b', marginBottom: 16 }}>
-                {gisCustomerStore.downloadProgress}% Complete
+                {gisDownloadProgress}% Complete
               </Text>
               <View style={{ width: '100%', height: 8, backgroundColor: '#e2e8f0', borderRadius: 4, overflow: 'hidden' }}>
-                <View style={{ width: `${gisCustomerStore.downloadProgress}%`, height: '100%', backgroundColor: '#1e5a8e' }} />
+                <View style={{ width: `${gisDownloadProgress}%`, height: '100%', backgroundColor: '#1e5a8e' }} />
               </View>
               <Text style={{ fontSize: 12, color: '#94a3b8', marginTop: 16, textAlign: 'center' }}>
-                {gisCustomerStore.downloadedRecords > 0 ? `${gisCustomerStore.downloadedRecords.toLocaleString()} records processed` : 'Please keep the app open...'}
+                {gisTotalRecords > 0 ? `Processing ${gisTotalRecords.toLocaleString()} records...` : 'Please keep the app open...'}
               </Text>
             </View>
           </View>
@@ -616,8 +649,8 @@ const DashboardScreen = observer(({ navigation }) => {
       <Modal
         animationType="fade"
         transparent={true}
-        visible={gisCustomerStore.downloadComplete}
-        onRequestClose={() => gisCustomerStore.setDownloadComplete(false)}
+        visible={gisDownloadComplete}
+        onRequestClose={() => setGisDownloadComplete(false)}
       >
         <View style={styles.modalOverlay}>
           <View style={[styles.detailsModalContainer, { height: 'auto', paddingVertical: 24 }]}>
@@ -636,7 +669,7 @@ const DashboardScreen = observer(({ navigation }) => {
                   paddingHorizontal: 32,
                   borderRadius: 8,
                 }}
-                onPress={() => gisCustomerStore.setDownloadComplete(false)}
+                onPress={() => setGisDownloadComplete(false)}
               >
                 <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>OK</Text>
               </TouchableOpacity>
