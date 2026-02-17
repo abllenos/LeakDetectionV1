@@ -31,7 +31,6 @@ const DashboardScreen = observer(({ navigation }) => {
   const [gisDownloadProgress, setGisDownloadProgress] = useState(0);
   const [gisTotalRecords, setGisTotalRecords] = useState(0);
   const [gisDownloadComplete, setGisDownloadComplete] = useState(false);
-  const [gisStatus, setGisStatus] = useState('downloading');
 
   useEffect(() => {
     console.log('[Dashboard] Component mounted, loading data...');
@@ -106,12 +105,10 @@ const DashboardScreen = observer(({ navigation }) => {
 
   const startGisDownload = async () => {
     setIsGisDownloading(true);
-    setGisStatus('downloading');
     try {
-      const result = await GisCustomerInterceptor.downloadAndSaveCustomers((progress, totalPages, totalRecords, status) => {
+      const result = await GisCustomerInterceptor.downloadAndSaveCustomers((progress, totalPages, totalRecords) => {
         setGisDownloadProgress(progress);
         setGisTotalRecords(totalRecords);
-        if (status) setGisStatus(status);
       });
       if (result.success) {
         setGisDownloadComplete(true);
@@ -620,10 +617,10 @@ const DashboardScreen = observer(({ navigation }) => {
             <View style={{ alignItems: 'center', paddingHorizontal: 20 }}>
               <ActivityIndicator size="large" color="#1e5a8e" style={{ marginBottom: 16 }} />
               <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1e5a8e', marginBottom: 8 }}>
-                {gisStatus === 'indexing' ? 'Optimizing Data...' : 'Downloading Customer Data'}
+                Downloading Customer Data
               </Text>
               <Text style={{ fontSize: 14, color: '#64748b', marginBottom: 16 }}>
-                {gisStatus === 'indexing' ? 'Building search index' : `${gisDownloadProgress}% Complete`}
+                {gisDownloadProgress}% Complete
               </Text>
               <View style={{ width: '100%', height: 8, backgroundColor: '#e2e8f0', borderRadius: 4, overflow: 'hidden' }}>
                 <View style={{ width: `${gisDownloadProgress}%`, height: '100%', backgroundColor: '#1e5a8e' }} />
