@@ -4,6 +4,7 @@ import { Alert } from 'react-native';
 import { devApi } from './interceptor';
 
 const CUSTOMER_DIR = FileSystem.documentDirectory + 'customer_data/';
+const GEO_INDEX_FILE = 'geo_index.json';
 const DOWNLOAD_DATE_KEY = '@customer_download_date';
 const CUSTOMER_COUNT_KEY = '@customer_count';
 const ENCRYPTION_KEY = 'dcwd-gis-fast-key-v1';
@@ -238,6 +239,148 @@ class GisCustomerInterceptor {
             console.error('Download interceptor error:', error);
             return { success: false, error: error.message };
         }
+    }
+
+    // Haversine formula for distance calculation
+    getDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371e3; // metres
+        const φ1 = lat1 * Math.PI / 180;
+        const φ2 = lat2 * Math.PI / 180;
+        const Δφ = (lat2 - lat1) * Math.PI / 180;
+        const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+        return R * c;
+    }
+
+    async findNearestMeters(lat, lng, limit = 3) {
+        try {
+            await this.ensureDirectory();
+
+            // Check if index exists
+            const indexFile = CUSTOMER_DIR + GEO_INDEX_FILE;
+            const indexInfo = await FileSystem.getInfoAsync(indexFile);
+
+            if (indexInfo.exists) {
+                return await this.searchUsingIndex(lat, lng, limit);
+            }
+
+            // Fallback: Build index and search (slow path for first run)
+            console.log('Building spatial index and searching...');
+            return await this.buildIndexAndSearch(lat, lng, limit);
+        } catch (error) {
+            console.error('Find nearest error:', error);
+            return [];
+        }
+    }
+
+    async searchUsingIndex(lat, lng, limit) {
+        try {
+            const content = await FileSystem.readAsStringAsync(CUSTOMER_DIR + GEO_INDEX_FILE);
+            const index = JSON.parse(content);
+
+            // Filter using bounding box first (fast) - approx 2km radius
+            const range = 0.02;
+            const candidates = [];
+
+            for (let i = 0; i < index.length; i++) {
+                const item = index[i];
+                // item: [lat, lng, chunkIdx, rowIdx]
+                if (Math.abs(lat - item[0]) <= range && Math.abs(lng - item[1]) <= range) {
+                    const dist = this.getDistance(lat, lng, item[0], item[1]);
+                    candidates.push({ item, dist });
+                }
+            }
+
+            candidates.sort((a, b) => a.dist - b.dist);
+            const top = candidates.slice(0, limit);
+
+            const results = [];
+            const chunksLoaded = {}; // Cache loaded chunks to minimize I/O
+
+            for (const candidate of top) {
+                const [rLat, rLng, chunkIdx, rowIdx] = candidate.item;
+
+                if (!chunksLoaded[chunkIdx]) {
+                    const chunkContent = await FileSystem.readAsStringAsync(CUSTOMER_DIR + `chunk_${chunkIdx}.json`);
+                    chunksLoaded[chunkIdx] = JSON.parse(chunkContent);
+                }
+
+                const row = chunksLoaded[chunkIdx][rowIdx];
+                if (row) {
+                    const decryptedName = row.name ? this.processData(this.hexToString(row.name), false) : '';
+                    results.push({
+                        ...row,
+                        name: decryptedName,
+                        distance: candidate.dist,
+                        latitude: rLat,
+                        longitude: rLng
+                    });
+                }
+            }
+
+            return results;
+        } catch (e) {
+            console.error('Index search failed, falling back to full scan', e);
+            await FileSystem.deleteAsync(CUSTOMER_DIR + GEO_INDEX_FILE, { idempotent: true });
+            return this.buildIndexAndSearch(lat, lng, limit);
+        }
+    }
+
+    async buildIndexAndSearch(lat, lng, limit) {
+        const files = await FileSystem.readDirectoryAsync(CUSTOMER_DIR);
+        const chunkFiles = files.filter(f => f.startsWith('chunk_') && f.endsWith('.json'));
+
+        if (chunkFiles.length === 0) return [];
+
+        let nearest = [];
+        const index = [];
+
+        for (const file of chunkFiles) {
+            const chunkIdx = parseInt(file.replace('chunk_', '').replace('.json', ''));
+            const content = await FileSystem.readAsStringAsync(CUSTOMER_DIR + file);
+            const chunk = JSON.parse(content);
+
+            for (let i = 0; i < chunk.length; i++) {
+                const row = chunk[i];
+                const rLat = parseFloat(row.latitude || row.lat || row.Latitude || row.LAT);
+                const rLng = parseFloat(row.longitude || row.lng || row.Longitude || row.LNG);
+
+                if (!isNaN(rLat) && !isNaN(rLng)) {
+                    // Add to index: [lat, lng, chunkIdx, rowIdx]
+                    index.push([rLat, rLng, chunkIdx, i]);
+
+                    // Search logic with bounding box optimization (approx 5km)
+                    if (Math.abs(lat - rLat) <= 0.05 && Math.abs(lng - rLng) <= 0.05) {
+                        const dist = this.getDistance(lat, lng, rLat, rLng);
+
+                        if (nearest.length < limit || dist < nearest[nearest.length - 1].distance) {
+                            const decryptedName = row.name ? this.processData(this.hexToString(row.name), false) : '';
+
+                            nearest.push({
+                                ...row,
+                                name: decryptedName,
+                                distance: dist,
+                                latitude: rLat,
+                                longitude: rLng
+                            });
+
+                            nearest.sort((a, b) => a.distance - b.distance);
+                            if (nearest.length > limit) nearest.pop();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Save index for next time
+        await FileSystem.writeAsStringAsync(CUSTOMER_DIR + GEO_INDEX_FILE, JSON.stringify(index));
+
+        return nearest;
     }
 
     async searchCustomers(query) {

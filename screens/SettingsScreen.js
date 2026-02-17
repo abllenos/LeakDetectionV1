@@ -40,6 +40,9 @@ const SettingsScreen = observer(({ navigation }) => {
   const [buildNumber, setBuildNumber] = useState('');
   const [useOfflineMap, setUseOfflineMap] = useState(false);
   const [customerCount, setCustomerCount] = useState(0);
+  const [isGisDownloading, setIsGisDownloading] = useState(false);
+  const [gisDownloadProgress, setGisDownloadProgress] = useState(0);
+  const [gisTotalRecords, setGisTotalRecords] = useState(0);
 
   // Get app version on mount
   useEffect(() => {
@@ -208,6 +211,26 @@ const SettingsScreen = observer(({ navigation }) => {
     );
   };
 
+  const startGisDownload = async () => {
+    setIsGisDownloading(true);
+    try {
+      const result = await GisCustomerInterceptor.downloadAndSaveCustomers((progress, totalPages, totalRecords) => {
+        setGisDownloadProgress(progress);
+        setGisTotalRecords(totalRecords);
+      });
+      if (result.success) {
+        checkCustomerStatus();
+        Alert.alert('Success', 'Customer data downloaded successfully.');
+      } else {
+        Alert.alert('Download Error', result.error || 'Failed to download customer data.');
+      }
+    } catch (error) {
+      Alert.alert('Download Error', 'Failed to download customer data.');
+    } finally {
+      setIsGisDownloading(false);
+    }
+  };
+
   return (
     <View style={styles.safe}>
       <StatusBar barStyle="light-content" backgroundColor="#1e5a8e" translucent />
@@ -317,7 +340,7 @@ const SettingsScreen = observer(({ navigation }) => {
             </View>
           </View>
 
-          {customerCount > 0 && (
+          {customerCount > 0 ? (
             <TouchableOpacity
               style={styles.clearDataButton}
               onPress={handleClearCustomers}
@@ -332,6 +355,15 @@ const SettingsScreen = observer(({ navigation }) => {
                 <Ionicons name="trash-outline" size={20} color="#fff" />
                 <Text style={styles.clearDataButtonText}>Clear Customer Data</Text>
               </LinearGradient>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.primaryBtnFull}
+              onPress={startGisDownload}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="download-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.primaryBtnText}>Download Customer Data</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -570,6 +602,34 @@ const SettingsScreen = observer(({ navigation }) => {
                   <Text style={styles.modalConfirmText}>Yes, Logout</Text>
                 </LinearGradient>
               </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* GIS Download Progress Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={isGisDownloading}
+        onRequestClose={() => { }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContainer, { height: 'auto', paddingVertical: 24 }]}>
+            <View style={{ alignItems: 'center', paddingHorizontal: 20 }}>
+              <ActivityIndicator size="large" color="#1e5a8e" style={{ marginBottom: 16 }} />
+              <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1e5a8e', marginBottom: 8 }}>
+                Downloading Customer Data
+              </Text>
+              <Text style={{ fontSize: 14, color: '#64748b', marginBottom: 16 }}>
+                {gisDownloadProgress}% Complete
+              </Text>
+              <View style={{ width: '100%', height: 8, backgroundColor: '#e2e8f0', borderRadius: 4, overflow: 'hidden' }}>
+                <View style={{ width: `${gisDownloadProgress}%`, height: '100%', backgroundColor: '#1e5a8e' }} />
+              </View>
+              <Text style={{ fontSize: 12, color: '#94a3b8', marginTop: 16, textAlign: 'center' }}>
+                {gisTotalRecords > 0 ? `Processing ${gisTotalRecords.toLocaleString()} records...` : 'Please keep the app open...'}
+              </Text>
             </View>
           </View>
         </View>
