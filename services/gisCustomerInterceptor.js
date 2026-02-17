@@ -218,7 +218,7 @@ class GisCustomerInterceptor {
 
                 if (onProgress) {
                     const percent = Math.round((completedPages / totalPages) * 100);
-                    onProgress(percent, totalPages, processedRecords);
+                    onProgress(percent, totalPages, processedRecords, 'downloading');
                 }
             }
 
@@ -230,6 +230,10 @@ class GisCustomerInterceptor {
             // Update Metadata
             await AsyncStorage.setItem(DOWNLOAD_DATE_KEY, new Date().toDateString());
             await AsyncStorage.setItem(CUSTOMER_COUNT_KEY, processedRecords.toString());
+
+            if (onProgress) {
+                onProgress(100, totalPages, processedRecords, 'indexing');
+            }
 
             // Build spatial index immediately after download
             await this.buildSpatialIndex();
@@ -355,34 +359,13 @@ class GisCustomerInterceptor {
                 if (!isNaN(rLat) && !isNaN(rLng)) {
                     // Add to index: [lat, lng, chunkIdx, rowIdx]
                     index.push([rLat, rLng, chunkIdx, i]);
-
-                    // Search logic with bounding box optimization (approx 5km)
-                    if (Math.abs(lat - rLat) <= 0.05 && Math.abs(lng - rLng) <= 0.05) {
-                        const dist = this.getDistance(lat, lng, rLat, rLng);
-
-                        if (nearest.length < limit || dist < nearest[nearest.length - 1].distance) {
-                            const decryptedName = row.name ? this.processData(this.hexToString(row.name), false) : '';
-
-                            nearest.push({
-                                ...row,
-                                name: decryptedName,
-                                distance: dist,
-                                latitude: rLat,
-                                longitude: rLng
-                            });
-
-                            nearest.sort((a, b) => a.distance - b.distance);
-                            if (nearest.length > limit) nearest.pop();
-                        }
-                    }
                 }
             }
         }
 
         // Save index for next time
         await FileSystem.writeAsStringAsync(CUSTOMER_DIR + GEO_INDEX_FILE, JSON.stringify(index));
-
-        return nearest;
+        console.log('Spatial index built successfully');
     }
 
     async searchCustomers(query) {
