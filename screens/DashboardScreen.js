@@ -96,8 +96,19 @@ const DashboardScreen = observer(({ navigation }) => {
   }, [offlineStore.isOnline]);
 
   const checkGisDownload = async () => {
+    if (isGisDownloading) return;
+
     try {
-      await GisCustomerInterceptor.checkAndPromptDownload(() => startGisDownload());
+      // Check if we have any customer data
+      const count = await GisCustomerInterceptor.getCustomerCount();
+
+      if (count === 0) {
+        console.log('[Dashboard] No customer data found, starting automatic download...');
+        startGisDownload();
+      } else {
+        // Only prompt if outdated
+        await GisCustomerInterceptor.checkAndPromptDownload(() => startGisDownload());
+      }
     } catch (error) {
       console.log('Error checking GIS download:', error);
     }
