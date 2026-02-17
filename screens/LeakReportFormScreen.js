@@ -213,6 +213,11 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
       if (draft.flagProjectLeak !== null) form.setFlagProjectLeak(draft.flagProjectLeak);
       if (draft.featuredId) form.setFeaturedId(draft.featuredId);
 
+      // Restore leak location if set
+      if (draft.leakLatitude && draft.leakLongitude) {
+        form.setLeakLocation(draft.leakLatitude, draft.leakLongitude, draft.leakLocationMethod);
+      }
+
       // Restore photos
       if (draft.leakPhotos && draft.leakPhotos.length > 0) {
         console.log('[LeakReportForm] Restoring leak photos:', draft.leakPhotos);
@@ -620,7 +625,7 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
   useEffect(() => {
     // Don't reset if we're returning from leak location selection
     const params = route?.params || {};
-    if (!params.fromLeakLocationSelection) {
+    if (!params.fromLeakLocationSelection && !params.fromDraft) {
       form.reset();
     }
     form.loadDmaOptions();

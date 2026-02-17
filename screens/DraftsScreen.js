@@ -29,7 +29,7 @@ const DraftsScreen = observer(({ navigation }) => {
   const handleOpenDraft = (draft) => {
     // Navigate to the leak report form with the draft data
     draftsStore.setCurrentDraftId(draft.id);
-    
+
     // Navigate to Report stack with the draft
     navigation.navigate('Report', {
       screen: 'ReportMap',
@@ -58,7 +58,7 @@ const DraftsScreen = observer(({ navigation }) => {
 
   const handleClearAll = () => {
     if (draftsStore.drafts.length === 0) return;
-    
+
     Alert.alert(
       'Clear All Drafts',
       `Are you sure you want to delete all ${draftsStore.drafts.length} drafts?`,
@@ -91,8 +91,12 @@ const DraftsScreen = observer(({ navigation }) => {
       '3': 'Valve',
       '4': 'Fire Hydrant',
       '5': 'Others',
+      'Serviceline': 'Service Line',
+      'Mainline': 'Main Line',
+      'Unidentified': 'Unidentified',
+      'Others': 'Others',
     };
-    return types[type] || 'Unknown';
+    return types[type] || type || 'Unknown';
   };
 
   const renderDraftItem = ({ item }) => (
@@ -124,7 +128,7 @@ const DraftsScreen = observer(({ navigation }) => {
           <Ionicons name="trash-outline" size={20} color="#ef4444" />
         </TouchableOpacity>
       </View>
-      
+
       <View style={styles.draftDetails}>
         {item.meterData?.address && (
           <View style={styles.detailRow}>
@@ -176,7 +180,7 @@ const DraftsScreen = observer(({ navigation }) => {
         <View>
           <Text style={styles.title}>Drafts Management</Text>
           <Text style={styles.subtitle}>
-            {draftsStore.draftCount > 0 
+            {draftsStore.draftCount > 0
               ? `${draftsStore.draftCount} saved draft${draftsStore.draftCount > 1 ? 's' : ''}`
               : 'No drafts saved'}
           </Text>
@@ -193,7 +197,7 @@ const DraftsScreen = observer(({ navigation }) => {
           )}
         </View>
       </LinearGradient>
-      
+
       {draftsStore.loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#3b82f6" />

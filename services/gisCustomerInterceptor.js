@@ -231,6 +231,9 @@ class GisCustomerInterceptor {
             await AsyncStorage.setItem(DOWNLOAD_DATE_KEY, new Date().toDateString());
             await AsyncStorage.setItem(CUSTOMER_COUNT_KEY, processedRecords.toString());
 
+            // Build spatial index immediately after download
+            await this.buildSpatialIndex();
+
             //await this.emailCustomerFiles();
 
             return { success: true, count: processedRecords };
@@ -265,13 +268,12 @@ class GisCustomerInterceptor {
             const indexFile = CUSTOMER_DIR + GEO_INDEX_FILE;
             const indexInfo = await FileSystem.getInfoAsync(indexFile);
 
-            if (indexInfo.exists) {
-                return await this.searchUsingIndex(lat, lng, limit);
+            if (!indexInfo.exists) {
+                console.log('Index missing, building spatial index...');
+                await this.buildSpatialIndex();
             }
 
-            // Fallback: Build index and search (slow path for first run)
-            console.log('Building spatial index and searching...');
-            return await this.buildIndexAndSearch(lat, lng, limit);
+            return await this.searchUsingIndex(lat, lng, limit);
         } catch (error) {
             console.error('Find nearest error:', error);
             return [];
@@ -325,19 +327,19 @@ class GisCustomerInterceptor {
 
             return results;
         } catch (e) {
-            console.error('Index search failed, falling back to full scan', e);
+            console.error('Index search failed', e);
             await FileSystem.deleteAsync(CUSTOMER_DIR + GEO_INDEX_FILE, { idempotent: true });
-            return this.buildIndexAndSearch(lat, lng, limit);
+            return [];
         }
     }
 
-    async buildIndexAndSearch(lat, lng, limit) {
+    async buildSpatialIndex() {
+        console.log('Building spatial index...');
         const files = await FileSystem.readDirectoryAsync(CUSTOMER_DIR);
         const chunkFiles = files.filter(f => f.startsWith('chunk_') && f.endsWith('.json'));
 
-        if (chunkFiles.length === 0) return [];
+        if (chunkFiles.length === 0) return;
 
-        let nearest = [];
         const index = [];
 
         for (const file of chunkFiles) {
