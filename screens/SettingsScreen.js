@@ -24,7 +24,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { observer } from 'mobx-react-lite';
 import { useSettingsStore, useOfflineStore, useDownloadStore } from '../stores/RootStore';
 import MapStore from '../stores/MapStore';
-import NotificationBanner from '../components/NotificationBanner';
 import { useFocusEffect } from '@react-navigation/native';
 import styles from '../styles/SettingsStyles';
 import GisCustomerInterceptor from '../services/gisCustomerInterceptor';
@@ -221,8 +220,6 @@ const SettingsScreen = observer(({ navigation }) => {
           <Ionicons name="settings" size={22} color="#fff" />
         </View>
       </LinearGradient>
-
-      <NotificationBanner />
 
       <ScrollView contentContainerStyle={styles.container}>
         {/* Offline Maps Card with download progress and controls */}

@@ -14,7 +14,6 @@ import AppHeader from '../components/AppHeader';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator } from 'react-native';
-import { startPeriodicDataCheck, stopPeriodicDataCheck } from '../services/dataChecker';
 import { observer } from 'mobx-react-lite';
 import { useDashboardStore, useOfflineStore, useDownloadStore, useGisCustomerStore } from '../stores/RootStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -27,7 +26,6 @@ const DashboardScreen = observer(({ navigation }) => {
   const downloadStore = useDownloadStore();
   const gisCustomerStore = useGisCustomerStore();
   const offlineStore = useOfflineStore();
-  const dataCheckIntervalRef = useRef(null);
 
   const [isGisDownloading, setIsGisDownloading] = useState(false);
   const [gisDownloadProgress, setGisDownloadProgress] = useState(0);
@@ -68,11 +66,6 @@ const DashboardScreen = observer(({ navigation }) => {
 
     loadData();
 
-    // Start periodic data checking (every 1 hour)
-    if (offlineStore.isOnline) {
-      dataCheckIntervalRef.current = startPeriodicDataCheck();
-    }
-
     const unsubscribe = navigation.addListener('focus', () => {
       console.log('[Dashboard] Screen focused, refreshing data...');
       dashboardStore.loadUserData();
@@ -87,10 +80,6 @@ const DashboardScreen = observer(({ navigation }) => {
 
     return () => {
       unsubscribe();
-      // Stop periodic checking when component unmounts
-      if (dataCheckIntervalRef.current) {
-        stopPeriodicDataCheck(dataCheckIntervalRef.current);
-      }
       console.log('[Dashboard] Component unmounted');
     };
   }, [offlineStore.isOnline]);

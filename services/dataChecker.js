@@ -1,6 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { checkForNewData } from './interceptor';
-import { pushNotification } from './notifications';
 
 const LAST_CHECK_KEY = 'lastDataCheck';
 const CHECK_INTERVAL = 60 * 60 * 1000; // Check every 1 hour (in milliseconds)
@@ -14,7 +13,7 @@ export const checkAndNotifyNewData = async () => {
     // Check if we should run (avoid too frequent checks)
     const lastCheck = await AsyncStorage.getItem(LAST_CHECK_KEY);
     const now = Date.now();
-    
+
     if (lastCheck) {
       const timeSinceLastCheck = now - parseInt(lastCheck);
       if (timeSinceLastCheck < CHECK_INTERVAL) {
@@ -24,24 +23,24 @@ export const checkAndNotifyNewData = async () => {
     }
 
     console.log('🔍 Checking for new customer data...');
-    
+
     // Check for new data
     const result = await checkForNewData();
-    
+
     // If skipped due to no authentication, don't update last check time
     if (result.skipped) {
       console.log('⏭️ Data check skipped - user not authenticated');
       return null;
     }
-    
+
     // Update last check time
     await AsyncStorage.setItem(LAST_CHECK_KEY, now.toString());
-    
+
     if (result.hasNewData) {
       console.log(`🔔 New data detected: ${result.difference} new customers available`);
-      
-      // Create notification
-      const notification = {
+
+      // Return update info (used by SettingsScreen)
+      return {
         title: 'New Customer Data Available',
         message: `${result.difference.toLocaleString()} new customer${result.difference > 1 ? 's' : ''} available for download`,
         type: 'data_update',
@@ -51,16 +50,11 @@ export const checkAndNotifyNewData = async () => {
           difference: result.difference
         }
       };
-      
-      await pushNotification(notification);
-      console.log('✅ Notification pushed successfully');
-      
-      return notification;
     } else if (result.needsDownload) {
       console.log(`🔔 Data changed detected: Remote=${result.remoteCount}, Local=${result.localCount}`);
-      
+
       // Data count changed (could be deletion or update)
-      const notification = {
+      return {
         title: 'Customer Data Update Available',
         message: `Customer data has changed. Please update your local data.`,
         type: 'data_update',
@@ -70,11 +64,6 @@ export const checkAndNotifyNewData = async () => {
           difference: result.difference
         }
       };
-      
-      await pushNotification(notification);
-      console.log('✅ Notification pushed successfully');
-      
-      return notification;
     } else {
       console.log('✓ No new data available');
       return null;
@@ -112,17 +101,17 @@ export const getLastCheckTime = async () => {
  */
 export const startPeriodicDataCheck = (intervalMs = CHECK_INTERVAL) => {
   console.log(`🔄 Starting periodic data check (every ${intervalMs / 1000 / 60} minutes)`);
-  
+
   // Run initial check after 30 seconds
   setTimeout(() => {
     checkAndNotifyNewData();
   }, 30000);
-  
+
   // Set up interval for periodic checks
   const intervalId = setInterval(() => {
     checkAndNotifyNewData();
   }, intervalMs);
-  
+
   return intervalId;
 };
 

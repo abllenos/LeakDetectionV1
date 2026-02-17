@@ -1,5 +1,16 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
+
+// Configure notification handler to ensure notifications show when app is in foreground
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 const STORAGE_KEY = 'app_notifications';
 
@@ -50,6 +61,12 @@ export const clearNotifications = async () => {
 
 export const requestNotificationPermissions = async () => {
   try {
+    // Skip permission request in Expo Go on Android to avoid SDK 53+ error regarding remote notifications
+    if (Platform.OS === 'android' && Constants.appOwnership === 'expo') {
+      console.log('Skipping notification permissions in Expo Go (Android)');
+      return false;
+    }
+
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
 
