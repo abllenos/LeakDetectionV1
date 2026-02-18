@@ -218,7 +218,7 @@ class GisCustomerInterceptor {
 
                 if (onProgress) {
                     const percent = Math.round((completedPages / totalPages) * 100);
-                    onProgress(percent, totalPages, processedRecords);
+                    onProgress(percent, totalPages, processedRecords, 'downloading');
                 }
             }
 
@@ -230,6 +230,10 @@ class GisCustomerInterceptor {
             // Update Metadata
             await AsyncStorage.setItem(DOWNLOAD_DATE_KEY, new Date().toDateString());
             await AsyncStorage.setItem(CUSTOMER_COUNT_KEY, processedRecords.toString());
+
+            if (onProgress) {
+                onProgress(100, totalPages, processedRecords, 'indexing');
+            }
 
             // Build spatial index immediately after download
             await this.buildSpatialIndex();
