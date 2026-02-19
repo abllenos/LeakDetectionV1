@@ -66,7 +66,7 @@ export default StyleSheet.create({
   searchBtnDisabled: { backgroundColor: '#cbd5e1', opacity: 0.6 },
   searchBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
   mapWrap: {
-    height: 400,
+    height: 280,
     backgroundColor: '#ddd',
     marginHorizontal: 16,
     borderRadius: 16,

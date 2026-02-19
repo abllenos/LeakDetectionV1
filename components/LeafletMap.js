@@ -179,7 +179,7 @@ const LeafletMap = ({
           position: fixed;
           top: 10px;
           right: 10px;
-          background: ${isUsingOfflineTiles ? '#7c3aed' : (isOnline ? '#10b981' : '#f59e0b')};
+          background: ${isUsingOfflineTiles ? '#A1A1A1' : (isOnline ? '#10b981' : '#f59e0b')};
           color: white;
           padding: 6px 12px;
           border-radius: 16px;
@@ -191,10 +191,7 @@ const LeafletMap = ({
           align-items: center;
           gap: 6px;
         }
-        .offline-indicator::before {
-          content: '${isUsingOfflineTiles ? '📦' : (isOnline ? '●' : '◐')}';
-          font-size: 10px;
-        }
+        
       </style>
     </head>
     <body>

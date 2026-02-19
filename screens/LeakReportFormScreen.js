@@ -39,6 +39,20 @@ const leakTypeOptions = [
   return a.label.localeCompare(b.label);
 });
 
+const coveringOptions = [
+  { value: 'Concrete', label: 'Concrete' },
+  { value: 'Gravel', label: 'Gravel' },
+  { value: 'Soil', label: 'Soil' },
+  { value: 'Asphalt', label: 'Asphalt' },
+];
+
+const causeOptions = [
+  { value: 'Exposed - PE', label: 'Exposed - PE' },
+  { value: 'Exposed - Supplement', label: 'Exposed - Supplement' },
+  { value: 'Defective Stopcock', label: 'Defective Stopcock' },
+  { value: 'Others', label: 'Others' },
+];
+
 // Helper function to save photo to persistent storage
 const savePhotoToStorage = async (tempUri) => {
   try {
@@ -143,6 +157,9 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
   const draftsStore = useDraftsStore();
   const offlineStore = useOfflineStore();
   const [showPreview, setShowPreview] = React.useState(false);
+  const [showLeakTypeDropdown, setShowLeakTypeDropdown] = React.useState(false);
+  const [showCoveringDropdown, setShowCoveringDropdown] = React.useState(false);
+  const [showCauseDropdown, setShowCauseDropdown] = React.useState(false);
   const isFocused = useIsFocused();
 
   // Store meter data and coordinates in local state to persist across navigations
@@ -780,14 +797,13 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
           )}
         </View>
 
-
+        {/* Instructions */}
+        <View style={styles.instructionRow}>
+          <Ionicons name="information-circle" size={18} color="#1e5a8e" />
+          <Text style={styles.instructionText}>  Please provide details about the leak</Text>
+        </View>
 
         <View style={styles.infoCard}>
-          {/* Instructions */}
-          <View style={styles.instructionRow}>
-            <Ionicons name="information-circle" size={18} color="#1e5a8e" />
-            <Text style={styles.instructionText}>  Please provide details about the leak</Text>
-          </View>
           {/* Pressure */}
           <Text style={styles.sectionLabel}>PRESSURE <Text style={{ color: '#ef4444' }}>*</Text></Text>
           <View style={styles.radioGroupSmall}>
@@ -802,38 +818,28 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
           </View>
 
           {/* Leak Type */}
-          <TouchableOpacity
-            style={styles.collapseHeader}
-            onPress={() => form.setLeakTypeExpanded(!form.leakTypeExpanded)}
-            activeOpacity={0.7}
-          >
-            <View style={styles.collapseHeaderLeft}>
-              <Text style={styles.sectionLabel}>LEAK TYPE <Text style={{ color: '#ef4444' }}>*</Text></Text>
-              {form.leakType && !form.leakTypeExpanded && (
-                <Text style={styles.selectedValue}>{leakTypeOptions.find(o => o.value === form.leakType)?.label || form.leakType}</Text>
-              )}
+          <View style={styles.sheet}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+              <Text style={styles.sectionTitle}>Leak Type</Text>
+              <Text style={styles.asterisk}> *</Text>
             </View>
-            <Ionicons
-              name={form.leakTypeExpanded ? "chevron-up" : "chevron-down"}
-              size={20}
-              color="#6b7280"
-            />
-          </TouchableOpacity>
 
-          {form.leakTypeExpanded && (
-            <View style={styles.radioList}>
-              {leakTypeOptions.map((option) => (
-                <TouchableOpacity
-                  key={option.value}
-                  style={styles.radioListRow}
-                  onPress={() => { form.setLeakType(option.value); form.setLeakTypeExpanded(false); }}
-                >
-                  <View style={[styles.radioCircle, form.leakType === option.value && styles.radioCircleActive]} />
-                  <Text style={styles.radioListLabel}>{option.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
+            {/* Dropdown for Leak Type */}
+            <TouchableOpacity
+              style={styles.dropdownButton}
+              onPress={() => setShowLeakTypeDropdown(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="water-outline" size={18} color="#1f3a8a" />
+              <Text style={[styles.dropdownText, !form.leakType && styles.dropdownPlaceholder]}>
+                {form.leakType
+                  ? leakTypeOptions.find(opt => opt.value === form.leakType)?.label || form.leakType
+                  : 'Select leak type'
+                }
+              </Text>
+              <Ionicons name="chevron-down" size={20} color="#6b7280" />
+            </TouchableOpacity>
+          </View>
 
           {/* Location */}
           <Text style={styles.sectionLabel}>Location <Text style={{ color: '#ef4444' }}>*</Text></Text>
@@ -853,98 +859,54 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
           </View>
 
           {/* Covering */}
-          <TouchableOpacity
-            style={styles.collapseHeader}
-            onPress={() => form.setCoveringExpanded(!form.coveringExpanded)}
-            activeOpacity={0.7}
-          >
-            <View style={styles.collapseHeaderLeft}>
-              <Text style={styles.sectionLabel}>COVERING <Text style={{ color: '#ef4444' }}>*</Text></Text>
-              {form.covering && !form.coveringExpanded && (
-                <Text style={styles.selectedValue}>{form.covering}</Text>
-              )}
+          <View style={styles.sheet}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+              <Text style={styles.sectionTitle}>Covering</Text>
+              <Text style={styles.asterisk}> *</Text>
             </View>
-            <Ionicons
-              name={form.coveringExpanded ? "chevron-up" : "chevron-down"}
-              size={20}
-              color="#6b7280"
-            />
-          </TouchableOpacity>
-
-          {form.coveringExpanded && (
-            <View style={styles.radioList}>
-              <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCovering('Concrete'); form.setCoveringExpanded(false); }}>
-                <View style={[styles.radioCircle, form.covering === 'Concrete' && styles.radioCircleActive]} />
-                <Text style={styles.radioListLabel}>CONCRETE</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCovering('Gravel'); form.setCoveringExpanded(false); }}>
-                <View style={[styles.radioCircle, form.covering === 'Gravel' && styles.radioCircleActive]} />
-                <Text style={styles.radioListLabel}>GRAVEL</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCovering('Soil'); form.setCoveringExpanded(false); }}>
-                <View style={[styles.radioCircle, form.covering === 'Soil' && styles.radioCircleActive]} />
-                <Text style={styles.radioListLabel}>SOIL</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCovering('Asphalt'); form.setCoveringExpanded(false); }}>
-                <View style={[styles.radioCircle, form.covering === 'Asphalt' && styles.radioCircleActive]} />
-                <Text style={styles.radioListLabel}>ASPHALT</Text>
-              </TouchableOpacity>
-            </View>
-          )}
+            <TouchableOpacity
+              style={styles.dropdownButton}
+              onPress={() => setShowCoveringDropdown(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="layers-outline" size={18} color="#1f3a8a" />
+              <Text style={[styles.dropdownText, !form.covering && styles.dropdownPlaceholder]}>
+                {form.covering || 'Select covering'}
+              </Text>
+              <Ionicons name="chevron-down" size={20} color="#6b7280" />
+            </TouchableOpacity>
+          </View>
 
           {/* Cause of Leak */}
-          <TouchableOpacity
-            style={styles.collapseHeader}
-            onPress={() => form.setCauseExpanded(!form.causeExpanded)}
-            activeOpacity={0.7}
-          >
-            <View style={styles.collapseHeaderLeft}>
-              <Text style={styles.sectionLabel}>CAUSE OF LEAK <Text style={{ color: '#ef4444' }}>*</Text></Text>
-              {form.causeOfLeak && !form.causeExpanded && (
-                <Text style={styles.selectedValue}>{form.causeOfLeak === 'Others' ? form.causeOther || 'Others' : form.causeOfLeak}</Text>
-              )}
+          <View style={styles.sheet}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+              <Text style={styles.sectionTitle}>Cause of Leak</Text>
+              <Text style={styles.asterisk}> *</Text>
             </View>
-            <Ionicons
-              name={form.causeExpanded ? "chevron-up" : "chevron-down"}
-              size={20}
-              color="#6b7280"
-            />
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.dropdownButton}
+              onPress={() => setShowCauseDropdown(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="alert-circle-outline" size={18} color="#1f3a8a" />
+              <Text style={[styles.dropdownText, !form.causeOfLeak && styles.dropdownPlaceholder]}>
+                {form.causeOfLeak || 'Select cause'}
+              </Text>
+              <Ionicons name="chevron-down" size={20} color="#6b7280" />
+            </TouchableOpacity>
 
-          {form.causeExpanded && (
-            <>
-              <View style={styles.radioList}>
-                <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCauseOfLeak('Exposed - PE'); form.setCauseExpanded(false); }}>
-                  <View style={[styles.radioCircle, form.causeOfLeak === 'Exposed - PE' && styles.radioCircleActive]} />
-                  <Text style={styles.radioListLabel}>Exposed - PE</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCauseOfLeak('Exposed - Supplement'); form.setCauseExpanded(false); }}>
-                  <View style={[styles.radioCircle, form.causeOfLeak === 'Exposed - Supplement' && styles.radioCircleActive]} />
-                  <Text style={styles.radioListLabel}>Exposed - Supplement</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCauseOfLeak('Defective Stopcock'); form.setCauseExpanded(false); }}>
-                  <View style={[styles.radioCircle, form.causeOfLeak === 'Defective Stopcock' && styles.radioCircleActive]} />
-                  <Text style={styles.radioListLabel}>Defective Stopcock</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.radioListRow} onPress={() => form.setCauseOfLeak('Others')}>
-                  <View style={[styles.radioCircle, form.causeOfLeak === 'Others' && styles.radioCircleActive]} />
-                  <Text style={styles.radioListLabel}>Others</Text>
-                </TouchableOpacity>
+            {form.causeOfLeak === 'Others' && (
+              <View style={[styles.inputWrap, { marginTop: 12, marginBottom: 0 }]}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Please describe"
+                  placeholderTextColor="#9aa5b1"
+                  value={form.causeOther}
+                  onChangeText={form.setCauseOther}
+                />
               </View>
-
-              {form.causeOfLeak === 'Others' && (
-                <View style={styles.inputWrap}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Please describe"
-                    placeholderTextColor="#9aa5b1"
-                    value={form.causeOther}
-                    onChangeText={form.setCauseOther}
-                  />
-                </View>
-              )}
-            </>
-          )}
+            )}
+          </View>
 
           {/* Asterra */}
           <Text style={styles.sectionLabel}>Asterra <Text style={{ color: '#ef4444' }}>*</Text></Text>
@@ -1104,6 +1066,93 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* Leak Type Selection Modal */}
+      <Modal visible={showLeakTypeDropdown} animationType="fade" transparent onRequestClose={() => setShowLeakTypeDropdown(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Select Leak Type</Text>
+            <ScrollView style={{ maxHeight: 300 }}>
+              {leakTypeOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[styles.dmaItem, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
+                  onPress={() => {
+                    form.setLeakType(option.value);
+                    setShowLeakTypeDropdown(false);
+                  }}
+                >
+                  <Text style={[styles.dmaText, form.leakType === option.value && { color: '#1e5a8e', fontWeight: '700' }]}>
+                    {option.label}
+                  </Text>
+                  {form.leakType === option.value && <Ionicons name="checkmark" size={18} color="#1e5a8e" />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={styles.modalCancel} onPress={() => setShowLeakTypeDropdown(false)}>
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Covering Selection Modal */}
+      <Modal visible={showCoveringDropdown} animationType="fade" transparent onRequestClose={() => setShowCoveringDropdown(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Select Covering</Text>
+            <ScrollView style={{ maxHeight: 300 }}>
+              {coveringOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[styles.dmaItem, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
+                  onPress={() => {
+                    form.setCovering(option.value);
+                    setShowCoveringDropdown(false);
+                  }}
+                >
+                  <Text style={[styles.dmaText, form.covering === option.value && { color: '#1e5a8e', fontWeight: '700' }]}>
+                    {option.label}
+                  </Text>
+                  {form.covering === option.value && <Ionicons name="checkmark" size={18} color="#1e5a8e" />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={styles.modalCancel} onPress={() => setShowCoveringDropdown(false)}>
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Cause Selection Modal */}
+      <Modal visible={showCauseDropdown} animationType="fade" transparent onRequestClose={() => setShowCauseDropdown(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Select Cause of Leak</Text>
+            <ScrollView style={{ maxHeight: 300 }}>
+              {causeOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[styles.dmaItem, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
+                  onPress={() => {
+                    form.setCauseOfLeak(option.value);
+                    setShowCauseDropdown(false);
+                  }}
+                >
+                  <Text style={[styles.dmaText, form.causeOfLeak === option.value && { color: '#1e5a8e', fontWeight: '700' }]}>
+                    {option.label}
+                  </Text>
+                  {form.causeOfLeak === option.value && <Ionicons name="checkmark" size={18} color="#1e5a8e" />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={styles.modalCancel} onPress={() => setShowCauseDropdown(false)}>
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Preview Modal */}
       <Modal visible={showPreview} animationType="slide" transparent onRequestClose={() => setShowPreview(false)}>

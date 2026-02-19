@@ -17,6 +17,34 @@ export const leakReportFormStyles = StyleSheet.create({
   scroll: { flex: 1 },
   scrollContent: { padding: 16 },
 
+  // New styles for Leak Type dropdown
+  sheet: {
+    backgroundColor: '#fff',
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  sectionTitle: {
+    fontSize: 14,
+    color: '#6b7280',
+    fontWeight: '500',
+  },
+  asterisk: { color: '#ef4444' },
+  dropdownButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  dropdownText: { flex: 1, fontSize: 15, color: '#1e293b', marginLeft: 10 },
+  dropdownPlaceholder: { color: '#94a3b8' },
+
   infoCard: {
     backgroundColor: '#fff',
     padding: 14,
@@ -288,7 +316,7 @@ export const leakReportFormStyles = StyleSheet.create({
   radioList: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 8, padding: 10, marginBottom: 12 },
   radioListRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
   radioListLabel: { marginLeft: 10, fontSize: 14, color: '#334155' },
-  
+
   collapseHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -309,7 +337,7 @@ export const leakReportFormStyles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 4,
   },
-  
+
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', padding: 20 },
   modalCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, maxHeight: '80%' },
   modalTitle: { fontSize: 16, fontWeight: '700', marginBottom: 12, color: '#1e3a5f' },
@@ -317,16 +345,16 @@ export const leakReportFormStyles = StyleSheet.create({
   dmaText: { fontSize: 14, color: '#334155' },
   modalCancel: { alignItems: 'center', paddingVertical: 12 },
   modalCancelText: { color: '#1e5a8e', fontWeight: '700' },
-  
+
   // Preview Modal Styles
-  previewOverlay: { 
-    flex: 1, 
-    backgroundColor: 'rgba(0,0,0,0.5)', 
+  previewOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
   },
-  previewCard: { 
-    backgroundColor: '#fff', 
-    borderTopLeftRadius: 24, 
+  previewCard: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     maxHeight: '90%',
     paddingBottom: 20,
