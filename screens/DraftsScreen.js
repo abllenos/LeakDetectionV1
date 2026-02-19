@@ -95,6 +95,12 @@ const DraftsScreen = observer(({ navigation }) => {
       'Mainline': 'Main Line',
       'Unidentified': 'Unidentified',
       'Others': 'Others',
+      'Airrelease': 'Air Release',
+      'Airreleasevalve': 'Air Release Valve',
+      'Blow-off': 'Blow-off',
+      'Blow-offvalve': 'Blow-off Valve',
+      'Firehydrant': 'Fire Hydrant',
+      'valve': 'Valve',
     };
     return types[type] || type || 'Unknown';
   };
@@ -175,8 +181,8 @@ const DraftsScreen = observer(({ navigation }) => {
 
   return (
     <View style={styles.safe}>
-      <StatusBar barStyle="light-content" backgroundColor="#1e5a8e" translucent />
-      <LinearGradient colors={["#1e5a8e", "#2d7ab8"]} style={styles.headerRow}>
+      <StatusBar barStyle="dark-content" backgroundColor="#f0f4f8" translucent />
+      <View style={styles.headerRow}>
         <View>
           <Text style={styles.title}>Drafts Management</Text>
           <Text style={styles.subtitle}>
@@ -188,15 +194,15 @@ const DraftsScreen = observer(({ navigation }) => {
         <View style={styles.headerRight}>
           {draftsStore.draftCount > 0 ? (
             <TouchableOpacity onPress={handleClearAll} style={styles.clearAllBtn}>
-              <Ionicons name="trash-outline" size={22} color="#fff" />
+              <Ionicons name="trash-outline" size={22} color="#111827" />
             </TouchableOpacity>
           ) : (
             <View style={styles.iconWrap}>
-              <Ionicons name="documents" size={22} color="#fff" />
+              <Ionicons name="documents" size={22} color="#111827" />
             </View>
           )}
         </View>
-      </LinearGradient>
+      </View>
 
       {draftsStore.loading ? (
         <View style={styles.loadingContainer}>

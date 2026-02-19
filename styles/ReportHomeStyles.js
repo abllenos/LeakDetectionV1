@@ -11,6 +11,7 @@ export default StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     paddingTop: 50,
+    backgroundColor: 'transparent',
   },
   backButton: {
     position: 'absolute',
@@ -24,8 +25,8 @@ export default StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerTitle: { color: '#fff', fontSize: 20, fontWeight: '700', textAlign: 'center' },
-  headerSubtitle: { color: 'rgba(255,255,255,0.9)', fontSize: 13, marginTop: 2, textAlign: 'center' },
+  headerTitle: { color: '#111827', fontSize: 20, fontWeight: '700', textAlign: 'center' },
+  headerSubtitle: { color: '#6b7280', fontSize: 13, marginTop: 2, textAlign: 'center' },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -34,13 +35,13 @@ export default StyleSheet.create({
     marginBottom: 12,
     gap: 10,
   },
-  searchInputWrap: { 
-    flex: 1, 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: '#fff', 
-    borderRadius: 12, 
-    paddingHorizontal: 12, 
+  searchInputWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingHorizontal: 12,
     height: 44,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -49,12 +50,12 @@ export default StyleSheet.create({
     elevation: 3,
   },
   searchInput: { flex: 1, color: '#333', fontSize: 15 },
-  searchBtn: { 
-    backgroundColor: '#1e5a8e', 
-    height: 44, 
-    paddingHorizontal: 18, 
-    borderRadius: 12, 
-    alignItems: 'center', 
+  searchBtn: {
+    backgroundColor: '#1e5a8e',
+    height: 44,
+    paddingHorizontal: 18,
+    borderRadius: 12,
+    alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -64,11 +65,11 @@ export default StyleSheet.create({
   },
   searchBtnDisabled: { backgroundColor: '#cbd5e1', opacity: 0.6 },
   searchBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-  mapWrap: { 
-    height: 400, 
-    backgroundColor: '#ddd', 
-    marginHorizontal: 16, 
-    borderRadius: 16, 
+  mapWrap: {
+    height: 400,
+    backgroundColor: '#ddd',
+    marginHorizontal: 16,
+    borderRadius: 16,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
@@ -77,7 +78,7 @@ export default StyleSheet.create({
     elevation: 8,
   },
   map: { ...StyleSheet.absoluteFillObject },
-  
+
   optionsSection: {
     paddingHorizontal: 16,
     paddingTop: 24,

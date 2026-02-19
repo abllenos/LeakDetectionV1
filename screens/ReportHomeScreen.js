@@ -46,7 +46,7 @@ const ReportHomeScreenInner = observer(({ navigation, params }) => {
       navigation.navigate('ReportMap', { meterNumber: store.meterNumber });
       return;
     }
-    
+
     const result = await store.searchMeter();
     if (result) {
       navigation.navigate('ReportMap', { meterNumber: store.meterNumber, searchResult: result });
@@ -55,16 +55,13 @@ const ReportHomeScreenInner = observer(({ navigation, params }) => {
 
   return (
     <SafeAreaView style={styles.safe} edges={[]}>
-      <StatusBar barStyle="light-content" backgroundColor="#1e5a8e" translucent />
-      <LinearGradient
-        colors={['#1e5a8e', '#2d7ab8']}
-        style={styles.header}
-      >
-        <TouchableOpacity 
-          onPress={() => navigation.goBack()} 
+      <StatusBar barStyle="dark-content" backgroundColor="#f0f4f8" translucent />
+      <View style={styles.header}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
           style={styles.backButton}
         >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Ionicons name="arrow-back" size={24} color="#111827" />
         </TouchableOpacity>
         <View style={styles.headerLeft}>
           <View>
@@ -72,10 +69,10 @@ const ReportHomeScreenInner = observer(({ navigation, params }) => {
             <Text style={styles.headerSubtitle}>Choose how to report</Text>
           </View>
         </View>
-      </LinearGradient>
+      </View>
 
-      <ScrollView 
-        style={styles.scrollView} 
+      <ScrollView
+        style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         scrollEnabled={scrollEnabled}
         nestedScrollEnabled={true}
@@ -95,9 +92,9 @@ const ReportHomeScreenInner = observer(({ navigation, params }) => {
               editable={!store.searching}
             />
           </View>
-          <TouchableOpacity 
-            style={[styles.searchBtn, store.searching && styles.searchBtnDisabled]} 
-            onPress={searchMeter} 
+          <TouchableOpacity
+            style={[styles.searchBtn, store.searching && styles.searchBtnDisabled]}
+            onPress={searchMeter}
             disabled={store.searching}
           >
             {store.searching ? (
@@ -108,7 +105,7 @@ const ReportHomeScreenInner = observer(({ navigation, params }) => {
           </TouchableOpacity>
         </View>
 
-        <View 
+        <View
           style={styles.mapWrap}
           onTouchStart={() => setScrollEnabled(false)}
           onTouchEnd={() => setScrollEnabled(true)}

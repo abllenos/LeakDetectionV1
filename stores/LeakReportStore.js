@@ -30,6 +30,7 @@ class LeakReportStore {
   dmaOptions = [];
   dmaLoading = false;
   submitting = false;
+  leakTypeExpanded = false;
   coveringExpanded = false;
   causeExpanded = false;
 
@@ -57,6 +58,7 @@ class LeakReportStore {
       dmaOptions: observable,
       dmaLoading: observable,
       submitting: observable,
+      leakTypeExpanded: observable,
       coveringExpanded: observable,
       causeExpanded: observable,
 
@@ -80,6 +82,7 @@ class LeakReportStore {
       setLeakLocation: action.bound,
       clearLeakLocation: action.bound,
       setShowDmaModal: action.bound,
+      setLeakTypeExpanded: action.bound,
       setCoveringExpanded: action.bound,
       setCauseExpanded: action.bound,
       reset: action.bound,
@@ -109,9 +112,10 @@ class LeakReportStore {
   setFlagProjectLeak(v) { this.flagProjectLeak = v; if (v === 0) this.featuredId = ''; }
   setFeaturedId(v) { this.featuredId = v; }
   setShowDmaModal(v) { this.showDmaModal = v; }
+  setLeakTypeExpanded(v) { this.leakTypeExpanded = v; }
   setCoveringExpanded(v) { this.coveringExpanded = v; }
   setCauseExpanded(v) { this.causeExpanded = v; }
-  
+
   // Leak location setters (where the actual leak is)
   setLeakLocation(lat, lng, method) {
     console.log('🔴 LeakReportStore.setLeakLocation called with:', lat, lng, method);
@@ -148,6 +152,7 @@ class LeakReportStore {
     this.dmaOptions = [];
     this.dmaLoading = false;
     this.submitting = false;
+    this.leakTypeExpanded = false;
     this.coveringExpanded = false;
     this.causeExpanded = false;
   }
@@ -191,7 +196,7 @@ class LeakReportStore {
   async submit({ meterData, coordinates, geom }) {
     if (this.submitting) return { ok: false, message: 'Already submitting' };
     this.submitting = true;
-    
+
     try {
       const payload = {
         leakType: this.leakType,
@@ -212,19 +217,19 @@ class LeakReportStore {
         coordinates,
         geom,
       };
-      
+
       // Check if online
       const isOnline = await checkOnlineStatus();
-      
+
       if (isOnline) {
         // If online, submit directly
         console.log('[LeakReportStore] Online - submitting directly to server');
         await submitLeakReport(payload);
-        
+
         runInAction(() => {
           this.submitting = false;
         });
-        
+
         return { ok: true, message: 'Report submitted successfully' };
       } else {
         // If offline, add to queue
@@ -233,24 +238,24 @@ class LeakReportStore {
           type: 'leak_report',
           data: payload,
         });
-        
+
         runInAction(() => {
           this.submitting = false;
         });
-        
-        return { 
-          ok: true, 
+
+        return {
+          ok: true,
           message: 'You are offline. Report saved and will be submitted when connection is restored.',
-          offline: true 
+          offline: true
         };
       }
     } catch (err) {
       console.error('[LeakReportStore] Submit error:', err);
-      
+
       runInAction(() => {
         this.submitting = false;
       });
-      
+
       // On error, try to save to queue as fallback
       try {
         const payload = {
@@ -272,16 +277,16 @@ class LeakReportStore {
           coordinates,
           geom: coordinates,
         };
-        
+
         await addToQueue({
           type: 'leak_report',
           data: payload,
         });
-        
-        return { 
-          ok: true, 
+
+        return {
+          ok: true,
           message: 'Report saved offline and will be submitted when connection is restored.',
-          offline: true 
+          offline: true
         };
       } catch (queueErr) {
         console.error('[LeakReportStore] Failed to save to queue:', queueErr);

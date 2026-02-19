@@ -22,6 +22,23 @@ import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { saveCurrentFormData, clearCurrentFormData, saveToDrafts, setFormActive } from '../services/draftService';
 import styles from '../styles/LeakReportFormStyles';
 
+const leakTypeOptions = [
+  { value: 'Unidentified', label: 'Unidentified' },
+  { value: 'Airrelease', label: 'Air Release' },
+  { value: 'Airreleasevalve', label: 'Air Release Valve' },
+  { value: 'Blow-off', label: 'Blow-off' },
+  { value: 'Blow-offvalve', label: 'Blow-off Valve' },
+  { value: 'Firehydrant', label: 'Fire Hydrant' },
+  { value: 'Mainline', label: 'Mainline' },
+  { value: 'Others', label: 'Others' },
+  { value: 'Serviceline', label: 'Service Line' },
+  { value: 'valve', label: 'Valve' },
+].sort((a, b) => {
+  if (a.value === 'Unidentified') return -1;
+  if (b.value === 'Unidentified') return 1;
+  return a.label.localeCompare(b.label);
+});
+
 // Helper function to save photo to persistent storage
 const savePhotoToStorage = async (tempUri) => {
   try {
@@ -176,6 +193,10 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
   useEffect(() => {
     if (initialMeterData) {
       setMeterData(initialMeterData);
+      // Ensure DMA is set in the store so it's included in the report
+      if (initialMeterData.dma || initialMeterData.dmacode) {
+        form.setDma(initialMeterData.dma || initialMeterData.dmacode);
+      }
     }
     if (initialCoordinates) {
       setCoordinates(initialCoordinates);
@@ -209,7 +230,14 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
       if (draft.covering) form.setCovering(draft.covering);
       if (draft.causeOfLeak) form.setCauseOfLeak(draft.causeOfLeak);
       if (draft.causeOther) form.setCauseOther(draft.causeOther);
-      if (draft.dma) form.setDma(draft.dma);
+
+      // Restore DMA - check draft root first, then fallback to meterData
+      if (draft.dma) {
+        form.setDma(draft.dma);
+      } else if (draft.meterData && (draft.meterData.dma || draft.meterData.dmacode)) {
+        form.setDma(draft.meterData.dma || draft.meterData.dmacode);
+      }
+
       if (draft.flagProjectLeak !== null) form.setFlagProjectLeak(draft.flagProjectLeak);
       if (draft.featuredId) form.setFeaturedId(draft.featuredId);
 
@@ -430,7 +458,7 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
       covering: form.covering,
       causeOfLeak: form.causeOfLeak,
       causeOther: form.causeOther,
-      dma: form.dma,
+      dma: form.dma || meterData?.dma || meterData?.dmacode || '',
       flagProjectLeak: form.flagProjectLeak,
       featuredId: form.featuredId,
       leakLatitude: form.leakLatitude,
@@ -494,6 +522,10 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
       Alert.alert('Missing info', 'Please provide contact person.');
       return;
     }
+    if (form.leakPhotos.length === 0) {
+      Alert.alert('Missing info', 'Please attach at least 1 leak photo.');
+      return;
+    }
 
     // Show preview modal instead of sending directly
     setShowPreview(true);
@@ -520,7 +552,7 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
           covering: form.covering,
           causeOfLeak: form.causeOfLeak,
           causeOther: form.causeOther,
-          dma: form.dma,
+          dma: form.dma || meterData?.dma || meterData?.dmacode || '',
           flagProjectLeak: form.flagProjectLeak,
           featuredId: form.featuredId,
           leakLatitude: form.leakLatitude,
@@ -573,7 +605,7 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
         covering: form.covering,
         causeOfLeak: form.causeOfLeak,
         causeOther: form.causeOther,
-        dma: form.dma,
+        dma: form.dma || meterData?.dma || meterData?.dmacode || '',
         contactName: form.contactName,
         contactNumber: form.contactNumber,
         landmark: form.landmark,
@@ -673,12 +705,16 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
               <Text style={styles.infoLabel}>Address</Text>
               <Text style={styles.infoValue}>{meterData?.address || ''}</Text>
             </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.infoLabel}>Dma</Text>
+              <Text style={styles.infoValue}>{meterData?.dma || meterData?.dmacode || ''}</Text>
+            </View>
           </View>
         </View>
 
         {/* Leak Location Section */}
-        <View style={styles.leakLocationCard}>
-          <View style={styles.leakLocationHeader}>
+        <View style={[styles.leakLocationCard, { paddingVertical: 12, paddingHorizontal: 12 }]}>
+          <View style={[styles.leakLocationHeader, { marginBottom: 8 }]}>
             <Ionicons name="pin" size={18} color="#dc2626" />
             <Text style={styles.leakLocationTitle}>  Leak Location</Text>
           </View>
@@ -698,12 +734,12 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
             </View>
           ) : (
             <View style={styles.leakLocationOptions}>
-              <Text style={styles.leakLocationHint}>
+              <Text style={[styles.leakLocationHint, { marginBottom: 8, fontSize: 13 }]}>
                 Where is the actual leak? (If different from meter location)
               </Text>
-              <View style={styles.leakLocationButtons}>
+              <View style={[styles.leakLocationButtons, { flexDirection: 'row', gap: 8 }]}>
                 <TouchableOpacity
-                  style={styles.leakLocationBtn}
+                  style={[styles.leakLocationBtn, { paddingVertical: 8, minHeight: 36, flex: 1 }]}
                   onPress={async () => {
                     try {
                       const { status } = await require('expo-location').requestForegroundPermissionsAsync();
@@ -720,11 +756,11 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
                     }
                   }}
                 >
-                  <Ionicons name="navigate" size={18} color="#fff" />
-                  <Text style={styles.leakLocationBtnText}>Use Current Location</Text>
+                  <Ionicons name="navigate" size={16} color="#fff" />
+                  <Text style={[styles.leakLocationBtnText, { fontSize: 13 }]}>Use Current Location</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.leakLocationBtn, styles.leakLocationBtnSecondary]}
+                  style={[styles.leakLocationBtn, styles.leakLocationBtnSecondary, { paddingVertical: 8, minHeight: 36, flex: 1 }]}
                   onPress={() => {
                     navigation.navigate('ReportMap', {
                       selectLeakLocation: true,
@@ -733,297 +769,303 @@ const LeakReportFormScreenInner = observer(({ meterData: initialMeterData, coord
                     });
                   }}
                 >
-                  <Ionicons name="map" size={18} color="#1e5a8e" />
-                  <Text style={[styles.leakLocationBtnText, { color: '#1e5a8e' }]}>Drag Pin on Map</Text>
+                  <Ionicons name="map" size={16} color="#1e5a8e" />
+                  <Text style={[styles.leakLocationBtnText, { color: '#1e5a8e', fontSize: 13 }]}>Drag Pin on Map</Text>
                 </TouchableOpacity>
               </View>
-              <Text style={styles.leakLocationNote}>
+              <Text style={[styles.leakLocationNote, { marginTop: 8, fontSize: 12 }]}>
                 💡 Skip this if the leak is at the meter location
               </Text>
             </View>
           )}
         </View>
 
-        {/* Instructions */}
-        <View style={styles.instructionRow}>
-          <Ionicons name="information-circle" size={18} color="#1e5a8e" />
-          <Text style={styles.instructionText}>  Please provide details about the leak</Text>
-        </View>
 
-        {/* Pressure */}
-        <Text style={styles.sectionLabel}>PRESSURE <Text style={{ color: '#ef4444' }}>*</Text></Text>
-        <View style={styles.radioGroupSmall}>
-          <TouchableOpacity style={styles.radioRow} onPress={() => form.setPressure('Low')}>
-            <View style={[styles.radioCircle, form.pressure === 'Low' && styles.radioCircleActive]} />
-            <Text style={styles.radioLabel}>LOW</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.radioRow} onPress={() => form.setPressure('High')}>
-            <View style={[styles.radioCircle, form.pressure === 'High' && styles.radioCircleActive]} />
-            <Text style={styles.radioLabel}>HIGH</Text>
-          </TouchableOpacity>
-        </View>
 
-        {/* Leak Type */}
-        <Text style={styles.sectionLabel}>Leak Type <Text style={{ color: '#ef4444' }}>*</Text></Text>
-        <View style={styles.buttonGrid}>
-          <TouchableOpacity
-            style={[styles.choiceBtn, form.leakType === 'Unidentified' && styles.choiceBtnActive]}
-            onPress={() => form.setLeakType('Unidentified')}
-          >
-            <Text style={[styles.choiceBtnText, form.leakType === 'Unidentified' && styles.choiceBtnTextActive]}>Unidentified</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.choiceBtn, form.leakType === 'Serviceline' && styles.choiceBtnActive]}
-            onPress={() => form.setLeakType('Serviceline')}
-          >
-            <Text style={[styles.choiceBtnText, form.leakType === 'Serviceline' && styles.choiceBtnTextActive]}>Serviceline</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.buttonGrid}>
-          <TouchableOpacity
-            style={[styles.choiceBtn, form.leakType === 'Mainline' && styles.choiceBtnActive]}
-            onPress={() => form.setLeakType('Mainline')}
-          >
-            <Text style={[styles.choiceBtnText, form.leakType === 'Mainline' && styles.choiceBtnTextActive]}>Mainline</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.choiceBtn, form.leakType === 'Others' && styles.choiceBtnActive]}
-            onPress={() => form.setLeakType('Others')}
-          >
-            <Text style={[styles.choiceBtnText, form.leakType === 'Others' && styles.choiceBtnTextActive]}>Others</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Location */}
-        <Text style={styles.sectionLabel}>Location <Text style={{ color: '#ef4444' }}>*</Text></Text>
-        <View style={styles.buttonGrid}>
-          <TouchableOpacity
-            style={[styles.choiceBtn, form.location === 'Surface' && styles.choiceBtnActive]}
-            onPress={() => form.setLocation('Surface')}
-          >
-            <Text style={[styles.choiceBtnText, form.location === 'Surface' && styles.choiceBtnTextActive]}>Surface</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.choiceBtn, form.location === 'Non-Surface' && styles.choiceBtnActive]}
-            onPress={() => form.setLocation('Non-Surface')}
-          >
-            <Text style={[styles.choiceBtnText, form.location === 'Non-Surface' && styles.choiceBtnTextActive]}>Non-Surface</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Covering */}
-        <TouchableOpacity
-          style={styles.collapseHeader}
-          onPress={() => form.setCoveringExpanded(!form.coveringExpanded)}
-          activeOpacity={0.7}
-        >
-          <View style={styles.collapseHeaderLeft}>
-            <Text style={styles.sectionLabel}>COVERING <Text style={{ color: '#ef4444' }}>*</Text></Text>
-            {form.covering && !form.coveringExpanded && (
-              <Text style={styles.selectedValue}>{form.covering}</Text>
-            )}
+        <View style={styles.infoCard}>
+          {/* Instructions */}
+          <View style={styles.instructionRow}>
+            <Ionicons name="information-circle" size={18} color="#1e5a8e" />
+            <Text style={styles.instructionText}>  Please provide details about the leak</Text>
           </View>
-          <Ionicons
-            name={form.coveringExpanded ? "chevron-up" : "chevron-down"}
-            size={20}
-            color="#6b7280"
-          />
-        </TouchableOpacity>
-
-        {form.coveringExpanded && (
-          <View style={styles.radioList}>
-            <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCovering('Concrete'); form.setCoveringExpanded(false); }}>
-              <View style={[styles.radioCircle, form.covering === 'Concrete' && styles.radioCircleActive]} />
-              <Text style={styles.radioListLabel}>CONCRETE</Text>
+          {/* Pressure */}
+          <Text style={styles.sectionLabel}>PRESSURE <Text style={{ color: '#ef4444' }}>*</Text></Text>
+          <View style={styles.radioGroupSmall}>
+            <TouchableOpacity style={styles.radioRow} onPress={() => form.setPressure('Low')}>
+              <View style={[styles.radioCircle, form.pressure === 'Low' && styles.radioCircleActive]} />
+              <Text style={styles.radioLabel}>LOW</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCovering('Gravel'); form.setCoveringExpanded(false); }}>
-              <View style={[styles.radioCircle, form.covering === 'Gravel' && styles.radioCircleActive]} />
-              <Text style={styles.radioListLabel}>GRAVEL</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCovering('Soil'); form.setCoveringExpanded(false); }}>
-              <View style={[styles.radioCircle, form.covering === 'Soil' && styles.radioCircleActive]} />
-              <Text style={styles.radioListLabel}>SOIL</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCovering('Asphalt'); form.setCoveringExpanded(false); }}>
-              <View style={[styles.radioCircle, form.covering === 'Asphalt' && styles.radioCircleActive]} />
-              <Text style={styles.radioListLabel}>ASPHALT</Text>
+            <TouchableOpacity style={styles.radioRow} onPress={() => form.setPressure('High')}>
+              <View style={[styles.radioCircle, form.pressure === 'High' && styles.radioCircleActive]} />
+              <Text style={styles.radioLabel}>HIGH</Text>
             </TouchableOpacity>
           </View>
-        )}
 
-        {/* Cause of Leak */}
-        <TouchableOpacity
-          style={styles.collapseHeader}
-          onPress={() => form.setCauseExpanded(!form.causeExpanded)}
-          activeOpacity={0.7}
-        >
-          <View style={styles.collapseHeaderLeft}>
-            <Text style={styles.sectionLabel}>CAUSE OF LEAK <Text style={{ color: '#ef4444' }}>*</Text></Text>
-            {form.causeOfLeak && !form.causeExpanded && (
-              <Text style={styles.selectedValue}>{form.causeOfLeak === 'Others' ? form.causeOther || 'Others' : form.causeOfLeak}</Text>
-            )}
-          </View>
-          <Ionicons
-            name={form.causeExpanded ? "chevron-up" : "chevron-down"}
-            size={20}
-            color="#6b7280"
-          />
-        </TouchableOpacity>
+          {/* Leak Type */}
+          <TouchableOpacity
+            style={styles.collapseHeader}
+            onPress={() => form.setLeakTypeExpanded(!form.leakTypeExpanded)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.collapseHeaderLeft}>
+              <Text style={styles.sectionLabel}>LEAK TYPE <Text style={{ color: '#ef4444' }}>*</Text></Text>
+              {form.leakType && !form.leakTypeExpanded && (
+                <Text style={styles.selectedValue}>{leakTypeOptions.find(o => o.value === form.leakType)?.label || form.leakType}</Text>
+              )}
+            </View>
+            <Ionicons
+              name={form.leakTypeExpanded ? "chevron-up" : "chevron-down"}
+              size={20}
+              color="#6b7280"
+            />
+          </TouchableOpacity>
 
-        {form.causeExpanded && (
-          <>
+          {form.leakTypeExpanded && (
             <View style={styles.radioList}>
-              <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCauseOfLeak('Exposed - PE'); form.setCauseExpanded(false); }}>
-                <View style={[styles.radioCircle, form.causeOfLeak === 'Exposed - PE' && styles.radioCircleActive]} />
-                <Text style={styles.radioListLabel}>Exposed - PE</Text>
+              {leakTypeOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={styles.radioListRow}
+                  onPress={() => { form.setLeakType(option.value); form.setLeakTypeExpanded(false); }}
+                >
+                  <View style={[styles.radioCircle, form.leakType === option.value && styles.radioCircleActive]} />
+                  <Text style={styles.radioListLabel}>{option.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {/* Location */}
+          <Text style={styles.sectionLabel}>Location <Text style={{ color: '#ef4444' }}>*</Text></Text>
+          <View style={styles.buttonGrid}>
+            <TouchableOpacity
+              style={[styles.choiceBtn, form.location === 'Surface' && styles.choiceBtnActive]}
+              onPress={() => form.setLocation('Surface')}
+            >
+              <Text style={[styles.choiceBtnText, form.location === 'Surface' && styles.choiceBtnTextActive]}>Surface</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.choiceBtn, form.location === 'Non-Surface' && styles.choiceBtnActive]}
+              onPress={() => form.setLocation('Non-Surface')}
+            >
+              <Text style={[styles.choiceBtnText, form.location === 'Non-Surface' && styles.choiceBtnTextActive]}>Non-Surface</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Covering */}
+          <TouchableOpacity
+            style={styles.collapseHeader}
+            onPress={() => form.setCoveringExpanded(!form.coveringExpanded)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.collapseHeaderLeft}>
+              <Text style={styles.sectionLabel}>COVERING <Text style={{ color: '#ef4444' }}>*</Text></Text>
+              {form.covering && !form.coveringExpanded && (
+                <Text style={styles.selectedValue}>{form.covering}</Text>
+              )}
+            </View>
+            <Ionicons
+              name={form.coveringExpanded ? "chevron-up" : "chevron-down"}
+              size={20}
+              color="#6b7280"
+            />
+          </TouchableOpacity>
+
+          {form.coveringExpanded && (
+            <View style={styles.radioList}>
+              <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCovering('Concrete'); form.setCoveringExpanded(false); }}>
+                <View style={[styles.radioCircle, form.covering === 'Concrete' && styles.radioCircleActive]} />
+                <Text style={styles.radioListLabel}>CONCRETE</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCauseOfLeak('Exposed - Supplement'); form.setCauseExpanded(false); }}>
-                <View style={[styles.radioCircle, form.causeOfLeak === 'Exposed - Supplement' && styles.radioCircleActive]} />
-                <Text style={styles.radioListLabel}>Exposed - Supplement</Text>
+              <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCovering('Gravel'); form.setCoveringExpanded(false); }}>
+                <View style={[styles.radioCircle, form.covering === 'Gravel' && styles.radioCircleActive]} />
+                <Text style={styles.radioListLabel}>GRAVEL</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCauseOfLeak('Defective Stopcock'); form.setCauseExpanded(false); }}>
-                <View style={[styles.radioCircle, form.causeOfLeak === 'Defective Stopcock' && styles.radioCircleActive]} />
-                <Text style={styles.radioListLabel}>Defective Stopcock</Text>
+              <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCovering('Soil'); form.setCoveringExpanded(false); }}>
+                <View style={[styles.radioCircle, form.covering === 'Soil' && styles.radioCircleActive]} />
+                <Text style={styles.radioListLabel}>SOIL</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.radioListRow} onPress={() => form.setCauseOfLeak('Others')}>
-                <View style={[styles.radioCircle, form.causeOfLeak === 'Others' && styles.radioCircleActive]} />
-                <Text style={styles.radioListLabel}>Others</Text>
+              <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCovering('Asphalt'); form.setCoveringExpanded(false); }}>
+                <View style={[styles.radioCircle, form.covering === 'Asphalt' && styles.radioCircleActive]} />
+                <Text style={styles.radioListLabel}>ASPHALT</Text>
               </TouchableOpacity>
             </View>
+          )}
 
-            {form.causeOfLeak === 'Others' && (
+          {/* Cause of Leak */}
+          <TouchableOpacity
+            style={styles.collapseHeader}
+            onPress={() => form.setCauseExpanded(!form.causeExpanded)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.collapseHeaderLeft}>
+              <Text style={styles.sectionLabel}>CAUSE OF LEAK <Text style={{ color: '#ef4444' }}>*</Text></Text>
+              {form.causeOfLeak && !form.causeExpanded && (
+                <Text style={styles.selectedValue}>{form.causeOfLeak === 'Others' ? form.causeOther || 'Others' : form.causeOfLeak}</Text>
+              )}
+            </View>
+            <Ionicons
+              name={form.causeExpanded ? "chevron-up" : "chevron-down"}
+              size={20}
+              color="#6b7280"
+            />
+          </TouchableOpacity>
+
+          {form.causeExpanded && (
+            <>
+              <View style={styles.radioList}>
+                <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCauseOfLeak('Exposed - PE'); form.setCauseExpanded(false); }}>
+                  <View style={[styles.radioCircle, form.causeOfLeak === 'Exposed - PE' && styles.radioCircleActive]} />
+                  <Text style={styles.radioListLabel}>Exposed - PE</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCauseOfLeak('Exposed - Supplement'); form.setCauseExpanded(false); }}>
+                  <View style={[styles.radioCircle, form.causeOfLeak === 'Exposed - Supplement' && styles.radioCircleActive]} />
+                  <Text style={styles.radioListLabel}>Exposed - Supplement</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.radioListRow} onPress={() => { form.setCauseOfLeak('Defective Stopcock'); form.setCauseExpanded(false); }}>
+                  <View style={[styles.radioCircle, form.causeOfLeak === 'Defective Stopcock' && styles.radioCircleActive]} />
+                  <Text style={styles.radioListLabel}>Defective Stopcock</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.radioListRow} onPress={() => form.setCauseOfLeak('Others')}>
+                  <View style={[styles.radioCircle, form.causeOfLeak === 'Others' && styles.radioCircleActive]} />
+                  <Text style={styles.radioListLabel}>Others</Text>
+                </TouchableOpacity>
+              </View>
+
+              {form.causeOfLeak === 'Others' && (
+                <View style={styles.inputWrap}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Please describe"
+                    placeholderTextColor="#9aa5b1"
+                    value={form.causeOther}
+                    onChangeText={form.setCauseOther}
+                  />
+                </View>
+              )}
+            </>
+          )}
+
+          {/* Asterra */}
+          <Text style={styles.sectionLabel}>Asterra <Text style={{ color: '#ef4444' }}>*</Text></Text>
+          <View style={styles.buttonGrid}>
+            <TouchableOpacity
+              style={[styles.choiceBtn, form.flagProjectLeak === 0 && styles.choiceBtnActive]}
+              onPress={() => form.setFlagProjectLeak(0)}
+            >
+              <Text style={[styles.choiceBtnText, form.flagProjectLeak === 0 && styles.choiceBtnTextActive]}>Not under POI</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.choiceBtn, form.flagProjectLeak === 1 && styles.choiceBtnActive]}
+              onPress={() => form.setFlagProjectLeak(1)}
+            >
+              <Text style={[styles.choiceBtnText, form.flagProjectLeak === 1 && styles.choiceBtnTextActive]}>Under POI</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Featured ID (shown only when Under POI is selected) */}
+          {form.flagProjectLeak === 1 && (
+            <>
+              <Text style={styles.sectionLabel}>Featured ID</Text>
               <View style={styles.inputWrap}>
+                <Ionicons name="bookmark-outline" size={18} color="#9aa5b1" style={{ marginRight: 10 }} />
                 <TextInput
                   style={styles.input}
-                  placeholder="Please describe"
+                  placeholder="Enter Featured ID"
                   placeholderTextColor="#9aa5b1"
-                  value={form.causeOther}
-                  onChangeText={form.setCauseOther}
+                  value={form.featuredId}
+                  onChangeText={form.setFeaturedId}
                 />
               </View>
+            </>
+          )}
+
+
+          {/* Contact Person */}
+          <Text style={styles.sectionLabel}>Contact Person</Text>
+          <View style={[styles.inputWrap, { height: 40, minHeight: 40, paddingVertical: 0 }]}>
+            <Ionicons name="person-outline" size={18} color="#9aa5b1" style={{ marginRight: 10 }} />
+            <TextInput
+              style={[styles.input, { height: '100%', paddingVertical: 0 }]}
+              placeholder="Name"
+              placeholderTextColor="#9aa5b1"
+              value={form.contactName}
+              onChangeText={form.setContactName}
+            />
+          </View>
+
+          {/* Reported Landmark */}
+          <Text style={styles.sectionLabel}>Reported Landmark <Text style={{ color: '#ef4444' }}>*</Text></Text>
+          <View style={styles.inputWrap}>
+            <Ionicons name="location-outline" size={18} color="#9aa5b1" style={{ marginRight: 10 }} />
+            <TextInput
+              style={styles.input}
+              placeholder="Describe nearby landmark (e.g., store, church)"
+              placeholderTextColor="#9aa5b1"
+              value={form.landmark}
+              onChangeText={form.setLandmark}
+            />
+          </View>
+
+          {/* Leak Photos */}
+          <View style={styles.photoSection}>
+            <Ionicons name="camera" size={18} color="#1e5a8e" />
+            <Text style={styles.photoSectionText}>  Add photos to help identify the leak</Text>
+          </View>
+          <View style={styles.photoHeader}>
+            <Text style={styles.photoLabel}>Leak Photos<Text style={{ color: '#ef4444' }}> Required 1 Photo*</Text></Text>
+            <Text style={styles.photoCount}>{form.leakPhotos.length}/2</Text>
+          </View>
+
+          {/* Display leak photos */}
+          <View style={styles.photoGrid}>
+            {form.leakPhotos.map((uri, index) => {
+              const displayUri = getPhotoUri(uri);
+              console.log(`[LeakReportForm] Displaying photo ${index}:`, uri, '=> Final URI:', displayUri);
+              return (
+                <View key={index} style={styles.photoPreview}>
+                  <Image source={{ uri: displayUri }} style={styles.photoImage} />
+                  <TouchableOpacity style={styles.photoRemove} onPress={() => removeLeakPhoto(index)}>
+                    <Ionicons name="close-circle" size={24} color="#ef4444" />
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
+            {form.leakPhotos.length < 2 && (
+              <TouchableOpacity style={styles.photoBtn} onPress={pickLeakPhoto}>
+                <Ionicons name="camera" size={28} color="#1e5a8e" />
+                <Text style={styles.photoBtnLabel}>+</Text>
+              </TouchableOpacity>
             )}
-          </>
-        )}
+          </View>
 
-        {/* Asterra */}
-        <Text style={styles.sectionLabel}>Asterra <Text style={{ color: '#ef4444' }}>*</Text></Text>
-        <View style={styles.buttonGrid}>
-          <TouchableOpacity
-            style={[styles.choiceBtn, form.flagProjectLeak === 0 && styles.choiceBtnActive]}
-            onPress={() => form.setFlagProjectLeak(0)}
-          >
-            <Text style={[styles.choiceBtnText, form.flagProjectLeak === 0 && styles.choiceBtnTextActive]}>Not under POI</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.choiceBtn, form.flagProjectLeak === 1 && styles.choiceBtnActive]}
-            onPress={() => form.setFlagProjectLeak(1)}
-          >
-            <Text style={[styles.choiceBtnText, form.flagProjectLeak === 1 && styles.choiceBtnTextActive]}>Under POI</Text>
-          </TouchableOpacity>
-        </View>
+          {/* Landmark Photo */}
+          <View style={styles.photoHeader}>
+            <Text style={styles.photoLabel}>Landmark Photo</Text>
+            <Text style={styles.photoCount}>{form.landmarkPhoto ? '1' : '0'}/1</Text>
+          </View>
 
-        {/* Featured ID (shown only when Under POI is selected) */}
-        {form.flagProjectLeak === 1 && (
-          <>
-            <Text style={styles.sectionLabel}>Featured ID</Text>
-            <View style={styles.inputWrap}>
-              <Ionicons name="bookmark-outline" size={18} color="#9aa5b1" style={{ marginRight: 10 }} />
-              <TextInput
-                style={styles.input}
-                placeholder="Enter Featured ID"
-                placeholderTextColor="#9aa5b1"
-                value={form.featuredId}
-                onChangeText={form.setFeaturedId}
-              />
-            </View>
-          </>
-        )}
-
-
-        {/* Contact Person */}
-        <Text style={styles.sectionLabel}>Contact Person</Text>
-        <View style={styles.inputWrap}>
-          <Ionicons name="person-outline" size={18} color="#9aa5b1" style={{ marginRight: 10 }} />
-          <TextInput
-            style={styles.input}
-            placeholder="Name"
-            placeholderTextColor="#9aa5b1"
-            value={form.contactName}
-            onChangeText={form.setContactName}
-          />
-        </View>
-
-        {/* Reported Landmark */}
-        <Text style={styles.sectionLabel}>Reported Landmark <Text style={{ color: '#ef4444' }}>*</Text></Text>
-        <View style={styles.inputWrap}>
-          <Ionicons name="location-outline" size={18} color="#9aa5b1" style={{ marginRight: 10 }} />
-          <TextInput
-            style={styles.input}
-            placeholder="Describe nearby landmark (e.g., store, church)"
-            placeholderTextColor="#9aa5b1"
-            value={form.landmark}
-            onChangeText={form.setLandmark}
-          />
-        </View>
-
-        {/* Leak Photos */}
-        <View style={styles.photoSection}>
-          <Ionicons name="camera" size={18} color="#1e5a8e" />
-          <Text style={styles.photoSectionText}>  Add photos to help identify the leak</Text>
-        </View>
-        <View style={styles.photoHeader}>
-          <Text style={styles.photoLabel}>Leak Photos (2 only) <Text style={{ color: '#ef4444' }}>*</Text></Text>
-          <Text style={styles.photoCount}>{form.leakPhotos.length}/2</Text>
-        </View>
-
-        {/* Display leak photos */}
-        <View style={styles.photoGrid}>
-          {form.leakPhotos.map((uri, index) => {
-            const displayUri = getPhotoUri(uri);
-            console.log(`[LeakReportForm] Displaying photo ${index}:`, uri, '=> Final URI:', displayUri);
-            return (
-              <View key={index} style={styles.photoPreview}>
-                <Image source={{ uri: displayUri }} style={styles.photoImage} />
-                <TouchableOpacity style={styles.photoRemove} onPress={() => removeLeakPhoto(index)}>
-                  <Ionicons name="close-circle" size={24} color="#ef4444" />
-                </TouchableOpacity>
-              </View>
-            );
-          })}
-          {form.leakPhotos.length < 2 && (
-            <TouchableOpacity style={styles.photoBtn} onPress={pickLeakPhoto}>
-              <Ionicons name="camera" size={28} color="#1e5a8e" />
-              <Text style={styles.photoBtnLabel}>+</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Landmark Photo */}
-        <View style={styles.photoHeader}>
-          <Text style={styles.photoLabel}>Landmark Photo</Text>
-          <Text style={styles.photoCount}>{form.landmarkPhoto ? '1' : '0'}/1</Text>
-        </View>
-
-        {/* Display landmark photo */}
-        <View style={styles.photoGrid}>
-          {form.landmarkPhoto && (() => {
-            const displayUri = getPhotoUri(form.landmarkPhoto);
-            console.log('[LeakReportForm] Displaying landmark photo:', form.landmarkPhoto, '=> Final URI:', displayUri);
-            return (
-              <View style={styles.photoPreview}>
-                <Image source={{ uri: displayUri }} style={styles.photoImage} />
-                <TouchableOpacity style={styles.photoRemove} onPress={removeLandmarkPhoto}>
-                  <Ionicons name="close-circle" size={24} color="#ef4444" />
-                </TouchableOpacity>
-              </View>
-            );
-          })()}
-          {!form.landmarkPhoto && (
-            <TouchableOpacity style={styles.photoBtn} onPress={pickLandmarkPhoto}>
-              <Ionicons name="camera" size={28} color="#1e5a8e" />
-              <Text style={styles.photoBtnLabel}>+</Text>
-            </TouchableOpacity>
-          )}
+          {/* Display landmark photo */}
+          <View style={styles.photoGrid}>
+            {form.landmarkPhoto && (() => {
+              const displayUri = getPhotoUri(form.landmarkPhoto);
+              console.log('[LeakReportForm] Displaying landmark photo:', form.landmarkPhoto, '=> Final URI:', displayUri);
+              return (
+                <View style={styles.photoPreview}>
+                  <Image source={{ uri: displayUri }} style={styles.photoImage} />
+                  <TouchableOpacity style={styles.photoRemove} onPress={removeLandmarkPhoto}>
+                    <Ionicons name="close-circle" size={24} color="#ef4444" />
+                  </TouchableOpacity>
+                </View>
+              );
+            })()}
+            {!form.landmarkPhoto && (
+              <TouchableOpacity style={styles.photoBtn} onPress={pickLandmarkPhoto}>
+                <Ionicons name="camera" size={28} color="#1e5a8e" />
+                <Text style={styles.photoBtnLabel}>+</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         {/* Footer note */}

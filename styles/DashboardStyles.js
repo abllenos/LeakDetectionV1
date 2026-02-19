@@ -12,6 +12,7 @@ export const dashboardStyles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     paddingTop: 50,
+    backgroundColor: 'transparent',
   },
   headerLeft: {
     flexDirection: 'row',
@@ -24,6 +25,7 @@ export const dashboardStyles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 14,
+    backgroundColor: '#e2e8f0',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -38,14 +40,14 @@ export const dashboardStyles = StyleSheet.create({
   greeting: {
     fontSize: 14,
     fontWeight: '600',
-    color: 'rgba(255,255,255,0.92)',
+    color: '#6b7280',
     letterSpacing: 0.3,
     textTransform: 'capitalize',
   },
   userName: {
     fontSize: 17,
     fontWeight: '700',
-    color: '#fff',
+    color: '#111827',
     marginTop: 2,
   },
   notificationButton: {
@@ -314,7 +316,7 @@ export const dashboardStyles = StyleSheet.create({
     fontSize: 14,
     color: '#94a3b8',
   },
-  
+
   // Notification Modal Styles
   notifModalOverlay: {
     flex: 1,
@@ -488,7 +490,7 @@ export const dashboardStyles = StyleSheet.create({
     color: '#94a3b8',
     marginTop: 4,
   },
-  
+
   // Modal styles
   modalOverlay: {
     flex: 1,
@@ -686,7 +688,7 @@ export const dashboardStyles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
   },
-  
+
   // All Reports Modal Styles
   allReportsModalContainer: {
     backgroundColor: '#fff',

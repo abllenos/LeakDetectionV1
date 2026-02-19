@@ -1,5 +1,7 @@
 // Helpers to handle storage-full scenarios caused by large cached datasets
 const STORAGE_AUTH_KEYS = new Set(['token', 'refresh_token', 'userData', 'savedUsername', 'savedPassword', 'rememberMe']);
+// API Base URL
+export const API_BASE = 'https://dev-api.davao-water.gov.ph/dcwd-gis/api/v1';
 
 const isStorageFullError = (err) => {
   const msg = (err?.message || err?.toString() || '').toString();
@@ -932,19 +934,6 @@ const generateRefNo = () => {
   return `${year}${month}${random}`;
 };
 
-// Helper function to map leak type to ID
-const getLeakTypeId = (leakType) => {
-  const typeMap = {
-    'Mainline': 38,
-    'Serviceline': 39,
-    'Service Line': 39,  // Support both formats
-    'After Meter': 40,
-    'Unidentified': 38,  // Default to mainline for unidentified
-    'Others': 38,        // Default to mainline for others
-  };
-  return typeMap[leakType] || 38; // Default to Mainline
-};
-
 // Helper function to map covering to ID
 const getCoveringId = (covering) => {
   const coveringMap = {
@@ -970,6 +959,22 @@ export const submitLeakReport = async (reportData) => {
       processed: (reportData.meterData?.accountNumber || '').replace(/\D/g, '').slice(-6)
     });
 
+    const leakTypeMapping = {
+      'Unidentified': { leakTypeId: 40, jmsCode: '0000', reportType: '' },
+      'Serviceline': { leakTypeId: 38, jmsCode: '0100', reportType: '54' },
+      'Service Line': { leakTypeId: 38, jmsCode: '0100', reportType: '54' },
+      'Mainline': { leakTypeId: 39, jmsCode: '0101', reportType: '55' },
+      'Blow-off': { leakTypeId: 64, jmsCode: '0113', reportType: '' },
+      'Blow-offvalve': { leakTypeId: 64, jmsCode: '0113', reportType: '' },
+      'Firehydrant': { leakTypeId: 65, jmsCode: '0114', reportType: '' },
+      'Airrelease': { leakTypeId: 66, jmsCode: '0115', reportType: '' },
+      'Airreleasevalve': { leakTypeId: 66, jmsCode: '0115', reportType: '' },
+      'valve': { leakTypeId: 61, jmsCode: '0116', reportType: '' },
+      'Others': { leakTypeId: 40, jmsCode: '0000', reportType: '' },
+    };
+
+    const leakMapping = leakTypeMapping[reportData.leakType] || leakTypeMapping['Unidentified'];
+
     // Build geometry string - coordinates is the LEAK location (may differ from meter)
     const longitude = reportData.coordinates?.longitude || 125.598699;
     const latitude = reportData.coordinates?.latitude || 7.060698;
@@ -992,22 +997,22 @@ export const submitLeakReport = async (reportData) => {
     const mappedData = {
       // Required fields
       RefNo: generateRefNo(), // Generate reference number
-      ReportedLocation: reportData.landmark || reportData.location || '',
+      ReportedLocation: reportData.meterData?.address || reportData.location || '',
       ReportedLandmark: reportData.landmark || '',
       ReferenceMtr: reportData.meterData?.meterNumber || '',
       ReportedNumber: reportData.contactNumber || '',
       ReferenceRecaddrs: (reportData.meterData?.accountNumber || '').replace(/\D/g, '').slice(-6), // Remove non-digits, take last 6
-      DmaCode: reportData.dma || '',
-      JmsCode: reportData.dma || '', // Use DMA code as JMS code fallback
+      DmaCode: reportData.dma || reportData.meterData?.dma || reportData.meterData?.dmacode || '',
+      JmsCode: leakMapping.jmsCode,
       ReporterName: `${user.fName || ''} ${user.mName || ''} ${user.lName || ''}`.trim() || reportData.contactName || '', // Use logged-in user's full name
       EmpId: user.empId || user.employeeId || '', // Add employee ID who created the report
 
       // Optional fields
-      LeakTypeId: getLeakTypeId(reportData.leakType),
+      LeakTypeId: leakMapping.leakTypeId,
       geom: geomString, // IMPORTANT: lowercase 'geom' (database column name)
       LeakCovering: getCoveringId(reportData.covering),
       Priority: 2, // Default priority
-      ReportType: 1, // Default report type
+      ReportType: parseInt(leakMapping.reportType, 10) || 1,
       DispatchStat: 0, // Default status: Pending (0=Pending, changed from web)
       LeakIndicator: 1, // Add leak indicator (required by backend)
       LeakLocation: reportData.location === 'Surface' ? 1 : 2, // 1=Surface, 2=Non-Surface
@@ -1118,8 +1123,7 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { handleSessionExpiry } from './autoLogout';
 
-// API Base URL
-export const API_BASE = 'https://dev-api.davao-water.gov.ph/dcwd-gis/api/v1';
+
 
 // Create axios instance
 export const devApi = axios.create({

@@ -18,6 +18,7 @@ export default StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     paddingTop: 50,
+    backgroundColor: 'transparent',
   },
   backButton: {
     position: 'absolute',
@@ -31,8 +32,8 @@ export default StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerTitle: { color: '#fff', fontSize: 20, fontWeight: '700', textAlign: 'center' },
-  headerSubtitle: { color: 'rgba(255,255,255,0.9)', fontSize: 13, marginTop: 2, textAlign: 'center' },
+  headerTitle: { color: '#111827', fontSize: 20, fontWeight: '700', textAlign: 'center' },
+  headerSubtitle: { color: '#6b7280', fontSize: 13, marginTop: 2, textAlign: 'center' },
   headerAction: {
     width: 44,
     height: 44,
@@ -227,9 +228,9 @@ export default StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.2)',
   },
-  coordText: { 
-    color: '#fff', 
-    fontSize: 12, 
+  coordText: {
+    color: '#fff',
+    fontSize: 12,
     fontWeight: '700',
     letterSpacing: 0.3,
   },
@@ -247,8 +248,8 @@ export default StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
-  attrText: { 
-    fontSize: 10, 
+  attrText: {
+    fontSize: 10,
     color: '#475569',
     fontWeight: '500',
   },
@@ -287,42 +288,42 @@ export default StyleSheet.create({
     justifyContent: 'center',
   },
   primaryBtnText: { color: '#fff', fontWeight: '700', letterSpacing: 0.5 },
-  
+
   /* Modal styles */
-  modalOverlay: { 
-    flex: 1, 
-    backgroundColor: 'rgba(0,0,0,0.5)', 
-    justifyContent: 'flex-end', 
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
     alignItems: 'center',
   },
-  modalCard: { 
-    width: '100%', 
-    backgroundColor: '#fff', 
-    borderTopLeftRadius: 20, 
+  modalCard: {
+    width: '100%',
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 24,
     paddingBottom: 32,
-    shadowColor: '#000', 
-    shadowOffset: { width: 0, height: -4 }, 
-    shadowOpacity: 0.15, 
-    shadowRadius: 12, 
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
     elevation: 12,
   },
-  modalTitle: { 
-    fontSize: 20, 
-    fontWeight: '700', 
-    color: '#111', 
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111',
     marginBottom: 8,
     textAlign: 'center',
   },
-  modalSubtitle: { 
-    color: '#6b7280', 
-    fontSize: 13, 
+  modalSubtitle: {
+    color: '#6b7280',
+    fontSize: 13,
     marginBottom: 20,
     textAlign: 'center',
     lineHeight: 18,
   },
-  modalOption: { 
+  modalOption: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 16,
@@ -350,25 +351,25 @@ export default StyleSheet.create({
   optionTextWrapper: {
     flex: 1,
   },
-  optionTitle: { 
-    fontSize: 16, 
-    fontWeight: '600', 
+  optionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
     color: '#111',
     marginBottom: 3,
   },
-  optionSubtitle: { 
-    fontSize: 12, 
+  optionSubtitle: {
+    fontSize: 12,
     color: '#6b7280',
     lineHeight: 16,
   },
-  modalCancel: { 
-    marginTop: 8, 
-    alignItems: 'center', 
+  modalCancel: {
+    marginTop: 8,
+    alignItems: 'center',
     paddingVertical: 14,
     borderRadius: 12,
   },
-  modalCancelText: { 
-    color: '#64748b', 
+  modalCancelText: {
+    color: '#64748b',
     fontWeight: '600',
     fontSize: 15,
     letterSpacing: 0.2,

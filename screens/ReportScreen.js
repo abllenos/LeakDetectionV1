@@ -388,7 +388,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
     if (normalized?.latitude && normalized?.longitude) {
       // Close modal first, then animate
       store.setShowSearchResults(false);
-      
+
       // Use setTimeout to allow modal to close before animating
       setTimeout(() => {
         const nextRegion = {
@@ -468,6 +468,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         meterNumber: nearestMeterData.meterNumber || '',
         accountNumber: nearestMeterData.accountNumber || '',
         address: nearestMeterData.address || '',
+        dma: nearestMeterData.dma || '',
       };
 
       const coords = {
@@ -489,6 +490,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
         meterNumber: store.currentMeterDetails.meterNumber || '',
         accountNumber: store.currentMeterDetails.accountNumber || '',
         address: store.currentMeterDetails.address || '',
+        dma: store.currentMeterDetails.dma || '',
       };
 
       const coords = {
@@ -521,9 +523,14 @@ const ReportScreenInner = observer(({ navigation, params }) => {
     }
 
     const normalized = store.currentMeterDetails || null;
-    const meterData = normalized && (normalized.meterNumber || normalized.accountNumber)
-      ? { meterNumber: normalized.meterNumber || '', accountNumber: normalized.accountNumber || '', address: normalized.address || '' }
-      : { meterNumber: store.meterNumber || '', accountNumber: '', address: '' };
+    const meterData = (normalized && (normalized.meterNumber || normalized.accountNumber))
+      ? {
+        meterNumber: normalized.meterNumber || '',
+        accountNumber: normalized.accountNumber || '',
+        address: normalized.address || '',
+        dma: normalized.dma || ''
+      }
+      : { meterNumber: store.meterNumber || '', accountNumber: '', address: '', dma: '' };
 
     const coords = {
       latitude: selectedCoordinates?.latitude,
@@ -605,18 +612,15 @@ const ReportScreenInner = observer(({ navigation, params }) => {
 
   return (
     <SafeAreaView style={styles.safe} edges={[]}>
-      <StatusBar barStyle="light-content" backgroundColor="#1e5a8e" translucent />
+      <StatusBar barStyle="dark-content" backgroundColor="#f0f4f8" translucent />
 
       {/* Header with Gradient */}
-      <LinearGradient
-        colors={['#1e5a8e', '#2d7ab8']}
-        style={styles.header}
-      >
+      <View style={styles.header}>
         <TouchableOpacity
           onPress={() => navigation.navigate('ReportHome')}
           style={styles.backButton}
         >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Ionicons name="arrow-back" size={24} color="#111827" />
         </TouchableOpacity>
         <View style={styles.headerLeft}>
           <View>
@@ -624,7 +628,7 @@ const ReportScreenInner = observer(({ navigation, params }) => {
             <Text style={styles.headerSubtitle}>Search meter or pick location</Text>
           </View>
         </View>
-      </LinearGradient>
+      </View>
 
       <ScrollView
         style={styles.scrollView}

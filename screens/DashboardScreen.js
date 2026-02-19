@@ -15,10 +15,11 @@ import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-ic
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator } from 'react-native';
 import { observer } from 'mobx-react-lite';
-import { useDashboardStore, useOfflineStore, useDownloadStore, useGisCustomerStore } from '../stores/RootStore';
+import { useDashboardStore, useOfflineStore, useDownloadStore, useGisCustomerStore, useDraftsStore } from '../stores/RootStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapStore from '../stores/MapStore';
 import styles from '../styles/DashboardStyles';
+import { dashboardStyles as themeStyles } from '../dashboardtheme';
 import GisCustomerInterceptor from '../services/gisCustomerInterceptor';
 
 const DashboardScreen = observer(({ navigation }) => {
@@ -26,6 +27,7 @@ const DashboardScreen = observer(({ navigation }) => {
   const downloadStore = useDownloadStore();
   const gisCustomerStore = useGisCustomerStore();
   const offlineStore = useOfflineStore();
+  const draftsStore = useDraftsStore();
 
   const [isGisDownloading, setIsGisDownloading] = useState(false);
   const [gisDownloadProgress, setGisDownloadProgress] = useState(0);
@@ -124,50 +126,6 @@ const DashboardScreen = observer(({ navigation }) => {
       setIsGisDownloading(false);
     }
   };
-
-  const statsData = [
-    {
-      id: 1,
-      iconName: 'water-drop',
-      iconFamily: 'MaterialIcons',
-      title: 'Total Reports',
-      subtitle: 'All leak reports',
-      count: dashboardStore.totalReports,
-      color: '#2196F3',
-      borderColor: '#2196F3',
-      onPress: () => dashboardStore.setAllReportsModalVisible(true),
-    },
-    {
-      id: 3,
-      iconName: 'checkmark-circle',
-      iconFamily: 'Ionicons',
-      title: 'Repaired',
-      subtitle: 'Completed fixes',
-      count: dashboardStore.repairedCount,
-      color: '#9C27B0',
-      borderColor: '#9C27B0',
-    },
-    {
-      id: 4,
-      iconName: 'camera',
-      iconFamily: 'Ionicons',
-      title: 'After Meter',
-      subtitle: 'Post-meter leaks',
-      count: dashboardStore.afterCount,
-      color: '#FF9800',
-      borderColor: '#FF9800',
-    },
-    {
-      id: 5,
-      iconName: 'alert-circle',
-      iconFamily: 'Ionicons',
-      title: 'Not Found',
-      subtitle: 'Unlocated leaks',
-      count: dashboardStore.notFoundCount,
-      color: '#F44336',
-      borderColor: '#F44336',
-    },
-  ];
 
   // Helper function to get time-based greeting
   const getGreeting = () => {
@@ -327,27 +285,21 @@ const DashboardScreen = observer(({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#1e5a8e" translucent />
+      <StatusBar barStyle="dark-content" backgroundColor="#f0f4f8" translucent />
 
       {/* Header with Gradient */}
-      <LinearGradient
-        colors={['#1e5a8e', '#2d7ab8']}
-        style={styles.header}
-      >
+      <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <LinearGradient
-            colors={['#fff', '#f0f9ff']}
-            style={styles.avatar}
-          >
+          <View style={styles.avatar}>
             <Text style={styles.avatarText}>{dashboardStore.userAvatar}</Text>
-          </LinearGradient>
+          </View>
           <View>
             <Text style={styles.greeting}>{getGreeting()}</Text>
             <Text style={styles.userName}>{dashboardStore.userName}</Text>
           </View>
         </View>
         {/* Notification button removed - SMS feature planned for future */}
-      </LinearGradient>
+      </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Loading indicator */}
@@ -367,49 +319,69 @@ const DashboardScreen = observer(({ navigation }) => {
           </View>
         )}
 
-        {/* Quick Stats Summary */}
-        {!dashboardStore.loadingReports && (
-          <>
-            <View style={styles.quickStats}>
-              <View style={styles.quickStatItem}>
-                <Text style={styles.quickStatValue}>{dashboardStore.totalReports}</Text>
-                <Text style={styles.quickStatLabel}>Total</Text>
-              </View>
-              <View style={styles.quickStatDivider} />
-              <View style={styles.quickStatItem}>
-                <Text style={[styles.quickStatValue, { color: '#9C27B0' }]}>
-                  {dashboardStore.repairedCount}
+        {/* Summary cards in a row */}
+        <View style={themeStyles.summaryRow}>
+          {/* Submitted Reports Summary */}
+          <View style={themeStyles.summaryCardSmall}>
+            <View style={themeStyles.summaryIconWrapper}>
+              <Ionicons name="list-outline" size={24} color="#1f3a8a" />
+            </View>
+            <Text style={themeStyles.summaryValueSmall}>{dashboardStore.totalReports + offlineStore.pendingCount}</Text>
+            <Text style={themeStyles.summaryLabelSmall}>Submitted</Text>
+            <View style={themeStyles.subStatsRow}>
+              <View style={themeStyles.subStat}>
+                <Text style={[themeStyles.subStatValue, { color: '#10b981' }]}>
+                  {dashboardStore.totalReports}
                 </Text>
-                <Text style={styles.quickStatLabel}>Repaired</Text>
+                <Text style={themeStyles.subStatLabel}>Synced</Text>
+              </View>
+              <View style={themeStyles.subStatDivider} />
+              <View style={themeStyles.subStat}>
+                <Text style={[themeStyles.subStatValue, { color: '#6b7280' }]}>{offlineStore.pendingCount}</Text>
+                <Text style={themeStyles.subStatLabel}>Pending</Text>
               </View>
             </View>
-          </>
-        )}
+          </View>
 
-        {/* Overview Section */}
-        <Text style={styles.sectionTitle}>Leak Detection Overview</Text>
+          {/* Draft Reports Summary */}
+          <View style={themeStyles.summaryCardSmall}>
+            <View style={[themeStyles.summaryIconWrapper, { backgroundColor: '#eef2ff' }]}>
+              <Ionicons name="document-outline" size={24} color="#1f3a8a" />
+            </View>
+            <Text style={themeStyles.summaryValueSmall}>{draftsStore.draftCount}</Text>
+            <Text style={themeStyles.summaryLabelSmall}>Drafts</Text>
+          </View>
+        </View>
 
-        {/* Stats Cards */}
-        <View style={styles.statsContainer}>
-          {statsData.map((stat) => (
-            <TouchableOpacity
-              key={stat.id}
-              style={[styles.statCard, { borderLeftColor: stat.borderColor }]}
-              activeOpacity={0.7}
-              onPress={stat.onPress}
-            >
-              <View style={styles.statLeft}>
-                <View style={[styles.statIconContainer, { backgroundColor: stat.color + '20' }]}>
-                  {renderIcon(stat.iconFamily, stat.iconName, 24, stat.color)}
-                </View>
-                <View style={styles.statInfo}>
-                  <Text style={styles.statTitle}>{stat.title}</Text>
-                  <Text style={styles.statSubtitle}>{stat.subtitle}</Text>
-                </View>
+        {/* See Submitted Reports button */}
+        <View style={{ marginHorizontal: 16, marginTop: 8 }}>
+          <TouchableOpacity
+            style={themeStyles.seeReportsBtn}
+            activeOpacity={0.85}
+            onPress={() => dashboardStore.setAllReportsModalVisible(true)}
+          >
+            <Ionicons name="list-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={themeStyles.seeReportsBtnText}>See Submitted Reports</Text>
+            {offlineStore.pendingCount > 0 && (
+              <View style={themeStyles.unsyncedBadge}>
+                <Text style={themeStyles.unsyncedBadgeText}>{offlineStore.pendingCount}</Text>
               </View>
-              <Text style={[styles.statCount, { color: stat.color }]}>{stat.count}</Text>
-            </TouchableOpacity>
-          ))}
+            )}
+            <Ionicons name="chevron-forward" size={18} color="#fff" style={{ marginLeft: 'auto' }} />
+          </TouchableOpacity>
+        </View>
+
+        {/* See Draft Reports button */}
+        <View style={{ marginHorizontal: 16, marginTop: 12, marginBottom: 24 }}>
+          <TouchableOpacity
+            style={themeStyles.seeDraftsBtn}
+            activeOpacity={0.85}
+            onPress={() => navigation.navigate('Drafts')}
+          >
+            <Ionicons name="document-outline" size={20} color="#1f3a8a" style={{ marginRight: 8 }} />
+            <Text style={themeStyles.seeDraftsBtnText}>See Draft Reports</Text>
+            <Ionicons name="chevron-forward" size={18} color="#1f3a8a" style={{ marginLeft: 'auto' }} />
+          </TouchableOpacity>
         </View>
 
         {/* Recent Activity Section */}

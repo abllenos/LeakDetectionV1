@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useContext } from 'react';
 import {
   View,
   Text,
@@ -6,34 +6,32 @@ import {
   Alert,
   ScrollView,
   ActivityIndicator,
-  StatusBar,
   Modal,
   Switch,
+  StatusBar,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
-import { API_BASE } from '../services/interceptor';
 import { logout } from '../services/interceptor';
 import { stopLocationTracking } from '../services/locationTracker';
-import { forceCheckNewData } from '../services/dataChecker';
 import updateChecker from '../services/updateChecker';
 import VersionCheck from 'react-native-version-check';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { observer } from 'mobx-react-lite';
-import { useSettingsStore, useOfflineStore, useDownloadStore } from '../stores/RootStore';
+import { useSettingsStore, useOfflineStore } from '../stores/RootStore';
 import MapStore from '../stores/MapStore';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
-import styles from '../styles/SettingsStyles';
+import { settingsStyles as styles } from '../settingstheme';
 import GisCustomerInterceptor from '../services/gisCustomerInterceptor';
 
 const MAP_URL = 'https://davao-water.gov.ph/dcwdApps/mobileApps/reactMap/davroad.zip';
 const OFFLINE_MAP_KEY = '@offline_map_enabled';
 
 const SettingsScreen = observer(({ navigation }) => {
+  const insets = useSafeAreaInsets();
   const store = useSettingsStore();
-  const downloadStore = useDownloadStore();
   const offlineStore = useOfflineStore();
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [appVersion, setAppVersion] = useState('');
@@ -235,39 +233,38 @@ const SettingsScreen = observer(({ navigation }) => {
   };
 
   return (
-    <View style={styles.safe}>
-      <StatusBar barStyle="light-content" backgroundColor="#1e5a8e" translucent />
-      <LinearGradient colors={["#1e5a8e", "#2d7ab8"]} style={styles.headerRow}>
+    <View style={styles.page}>
+      <StatusBar barStyle="dark-content" backgroundColor="#f3f4f6" translucent />
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, 20) + 10 }]}>
         <View>
-          <Text style={styles.title}>Settings</Text>
-          <Text style={styles.subtitle}>App configuration and preferences</Text>
+          <Text style={styles.headerTitle}>Settings</Text>
+          <Text style={styles.headerSubtitle}>App configuration and preferences</Text>
         </View>
-        <View style={styles.iconWrap}>
-          <Ionicons name="settings" size={22} color="#fff" />
-        </View>
-      </LinearGradient>
+        <View style={styles.headerIcon}><Ionicons name="settings" size={22} color="#111827" /></View>
+      </View>
 
-      <ScrollView contentContainerStyle={styles.container}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
         {/* Offline Maps Card with download progress and controls */}
-        <View style={styles.card}>
+        <View style={styles.sheet}>
           <View style={styles.cardHeaderRow}>
-            <Ionicons name="map" size={18} color="#1e5a8e" />
-            <Text style={styles.cardTitle}>  Offline Maps</Text>
+            <View style={styles.detailIcon}><Ionicons name="map-outline" size={18} color="#1f3a8a" /></View>
+            <Text style={styles.sheetTitle}>Offline Maps</Text>
           </View>
 
-          <View style={styles.row}>
-            <Text style={styles.label}>Map Status:</Text>
-            <View style={[styles.statusBadge, { backgroundColor: getMapStatusColor() }]}>
-              <Text style={[styles.statusText, { color: getMapStatusTextColor() }]}>
+          <View style={{ marginTop: 8 }}>
+            <View style={styles.itemRow}>
+              <Text style={styles.itemLabel}>Map Status:</Text>
+              <Text style={[styles.itemValue, { color: getMapStatusTextColor() }]}>
                 {getMapStatusText()}
               </Text>
             </View>
           </View>
 
-          <View style={styles.row}>
-            <Text style={styles.label}>Current Mode:</Text>
-            <View style={[styles.statusBadge, { backgroundColor: (offlineStore.isOnline && !useOfflineMap) ? '#d1fae5' : (useOfflineMap && MapStore.isReady ? '#d1fae5' : '#fee2e2') }]}>
-              <Text style={[styles.statusText, { color: (offlineStore.isOnline && !useOfflineMap) ? '#059669' : (useOfflineMap && MapStore.isReady ? '#059669' : '#dc2626') }]}>
+          <View style={{ marginTop: 8 }}>
+            <View style={styles.itemRow}>
+              <Text style={styles.itemLabel}>Current Mode:</Text>
+              <Text style={[styles.itemValue, { color: (offlineStore.isOnline && !useOfflineMap) ? '#059669' : (useOfflineMap && MapStore.isReady ? '#059669' : '#dc2626') }]}>
                 {useOfflineMap && MapStore.isReady ? 'Using Offline Tiles' : (offlineStore.isOnline ? 'Using Online Tiles' : 'No Connection')}
               </Text>
             </View>
@@ -275,8 +272,8 @@ const SettingsScreen = observer(({ navigation }) => {
 
           {/* Offline Map Toggle - Only show when map is ready */}
           {MapStore.isReady && !MapStore.isDownloading && !MapStore.isUnzipping && (
-            <View style={styles.row}>
-              <Text style={styles.label}>Use Offline Map</Text>
+            <View style={styles.itemRow}>
+              <Text style={styles.itemLabel}>Use Offline Map</Text>
               <Switch
                 value={useOfflineMap}
                 onValueChange={toggleOfflineMap}
@@ -289,21 +286,19 @@ const SettingsScreen = observer(({ navigation }) => {
 
           {/* Download Progress */}
           {(MapStore.isDownloading || MapStore.isUnzipping) && (
-            <View style={{ marginTop: 16 }}>
-              <View style={styles.progressBarBackground}>
-                <View style={[styles.progressBarFill, { width: `${MapStore.downloadProgress}%` }]} />
+            <View style={styles.progressSection}>
+              <Text style={styles.progressLabel}>{MapStore.statusMessage}</Text>
+              <View style={styles.progressBar}>
+                <View style={[styles.progressFill, { width: `${MapStore.downloadProgress}%` }]} />
               </View>
-              <Text style={styles.progressText}>
-                {MapStore.statusMessage}
-              </Text>
-
+              <Text style={styles.progressText}>{MapStore.downloadProgress}%</Text>
             </View>
           )}
 
           {/* Download Map Button */}
           {!MapStore.isDownloading && !MapStore.isUnzipping && (
             <TouchableOpacity
-              style={styles.primaryBtnFull}
+              style={styles.primaryBtn}
               onPress={handleDownloadMap}
             >
               <Ionicons name="download-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
@@ -314,54 +309,53 @@ const SettingsScreen = observer(({ navigation }) => {
           )}
 
           {/* Clear Map Button */}
-          <TouchableOpacity
-            style={[styles.outlineBtnFullSpaced, !MapStore.isReady && { opacity: 0.5 }]}
-            onPress={handleClearMap}
-            disabled={!MapStore.isReady || MapStore.isDownloading || MapStore.isUnzipping}
-          >
-            <Text style={styles.outlineBtnText}>Clear Map Data</Text>
-          </TouchableOpacity>
+          {MapStore.isReady && !MapStore.isDownloading && !MapStore.isUnzipping && (
+            <View style={{ marginTop: 12 }}>
+              <TouchableOpacity
+                style={styles.clearBtn}
+                onPress={handleClearMap}
+              >
+                <Ionicons name="trash-outline" size={18} color="#ef4444" style={{ marginRight: 8 }} />
+                <Text style={styles.clearBtnText}>Clear Map Data</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         {/* Customer Data Card */}
-        <View style={styles.card}>
+        <View style={styles.sheet}>
           <View style={styles.cardHeaderRow}>
-            <Ionicons name="people" size={18} color="#1e5a8e" />
-            <Text style={styles.cardTitle}>  Customer Data</Text>
+            <View style={styles.detailIcon}><Ionicons name="people-outline" size={18} color="#1f3a8a" /></View>
+            <Text style={styles.sheetTitle}>Customer Data</Text>
           </View>
 
-          <View style={styles.rowBetween}>
-            <View>
-              <Text style={styles.smallLabel}>Cached Records:</Text>
-              <Text style={styles.valueText}>{customerCount.toLocaleString()}</Text>
+          <View style={{ marginTop: 8 }}>
+            <View style={styles.itemRow}>
+              <Text style={styles.itemLabel}>Cached Records:</Text>
+              <Text style={styles.itemValue}>{customerCount.toLocaleString()}</Text>
             </View>
-            <View>
-              <Text style={styles.smallLabel}>Status:</Text>
-              <Text style={styles.valueText}>
+            <View style={styles.itemRow}>
+              <Text style={styles.itemLabel}>Status:</Text>
+              <Text style={styles.itemValue}>
                 {customerCount > 0 ? 'Downloaded' : 'Not Available'}
               </Text>
             </View>
           </View>
 
           {customerCount > 0 ? (
-            <TouchableOpacity
-              style={styles.clearDataButton}
-              onPress={handleClearCustomers}
-              activeOpacity={0.7}
-            >
-              <LinearGradient
-                colors={['#ef4444', '#dc2626']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.clearDataGradient}
+            <View style={{ marginTop: 12 }}>
+              <TouchableOpacity
+                style={styles.clearBtn}
+                onPress={handleClearCustomers}
+                activeOpacity={0.7}
               >
-                <Ionicons name="trash-outline" size={20} color="#fff" />
-                <Text style={styles.clearDataButtonText}>Clear Customer Data</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+                <Ionicons name="trash-outline" size={18} color="#ef4444" style={{ marginRight: 8 }} />
+                <Text style={styles.clearBtnText}>Clear Customer Data</Text>
+              </TouchableOpacity>
+            </View>
           ) : (
             <TouchableOpacity
-              style={styles.primaryBtnFull}
+              style={styles.primaryBtn}
               onPress={startGisDownload}
               activeOpacity={0.7}
             >
@@ -372,33 +366,33 @@ const SettingsScreen = observer(({ navigation }) => {
         </View>
 
         {/* Offline Queue Card */}
-        <View style={styles.card}>
+        <View style={styles.sheet}>
           <View style={styles.cardHeaderRow}>
-            <Ionicons name="cloud-offline" size={18} color="#1e5a8e" />
-            <Text style={styles.cardTitle}>  Offline Queue</Text>
+            <View style={styles.detailIcon}><Ionicons name="cloud-offline-outline" size={18} color="#1f3a8a" /></View>
+            <Text style={styles.sheetTitle}>Offline Queue</Text>
           </View>
 
-          <View style={styles.row}>
-            <Text style={styles.label}>Network Status:</Text>
-            <View style={[styles.statusBadge, { backgroundColor: offlineStore.isOnline ? '#d1fae5' : '#fee2e2' }]}>
-              <Text style={[styles.statusText, { color: offlineStore.isOnline ? '#059669' : '#dc2626' }]}>
+          <View style={{ marginTop: 8 }}>
+            <View style={styles.itemRow}>
+              <Text style={styles.itemLabel}>Network Status:</Text>
+              <Text style={[styles.itemValue, { color: offlineStore.isOnline ? '#059669' : '#dc2626' }]}>
                 {offlineStore.isOnline ? 'Online' : 'Offline'}
               </Text>
             </View>
           </View>
 
-          <View style={styles.rowBetween}>
-            <View>
-              <Text style={styles.smallLabel}>Pending Items:</Text>
-              <Text style={styles.valueText}>{offlineStore.pendingCount}</Text>
+          <View style={{ marginTop: 8 }}>
+            <View style={styles.itemRow}>
+              <Text style={styles.itemLabel}>Pending Items:</Text>
+              <Text style={styles.itemValue}>{offlineStore.pendingCount}</Text>
             </View>
-            <View>
-              <Text style={styles.smallLabel}>Failed Items:</Text>
-              <Text style={styles.valueText}>{offlineStore.failedCount}</Text>
+            <View style={styles.itemRow}>
+              <Text style={styles.itemLabel}>Failed Items:</Text>
+              <Text style={styles.itemValue}>{offlineStore.failedCount}</Text>
             </View>
-            <View>
-              <Text style={styles.smallLabel}>Last Sync:</Text>
-              <Text style={styles.valueText}>
+            <View style={styles.itemRow}>
+              <Text style={styles.itemLabel}>Last Sync:</Text>
+              <Text style={styles.itemValue}>
                 {offlineStore.lastSyncTime ? new Date(offlineStore.lastSyncTime).toLocaleTimeString() : 'Never'}
               </Text>
             </View>
@@ -406,11 +400,11 @@ const SettingsScreen = observer(({ navigation }) => {
 
           {/* Auto-logout warning when offline */}
           {!offlineStore.isOnline && offlineStore.lastOnlineTime && (
-            <View style={styles.offlineWarningBox}>
+            <View style={[styles.itemRow, { backgroundColor: '#fffbeb', borderColor: '#fcd34d', borderWidth: 1 }]}>
               <Ionicons name="warning" size={16} color="#f59e0b" />
               <View style={{ flex: 1, marginLeft: 8 }}>
-                <Text style={styles.offlineWarningTitle}>Auto-logout Timer</Text>
-                <Text style={styles.offlineWarningText}>
+                <Text style={{ fontWeight: 'bold', color: '#92400e', fontSize: 13 }}>Auto-logout Timer</Text>
+                <Text style={{ color: '#b45309', fontSize: 12, marginTop: 2 }}>
                   You will be automatically logged out in {getRemainingTimeText()} if you remain offline. Please connect to the internet to reset the timer.
                 </Text>
               </View>
@@ -419,11 +413,11 @@ const SettingsScreen = observer(({ navigation }) => {
 
           {/* Auto-sync info when offline with pending items */}
           {!offlineStore.isOnline && offlineStore.pendingCount > 0 && (
-            <View style={[styles.offlineWarningBox, { backgroundColor: '#eff6ff', borderColor: '#3b82f6' }]}>
+            <View style={[styles.itemRow, { backgroundColor: '#eff6ff', borderColor: '#3b82f6', borderWidth: 1 }]}>
               <Ionicons name="cloud-upload-outline" size={16} color="#3b82f6" />
               <View style={{ flex: 1, marginLeft: 8 }}>
-                <Text style={[styles.offlineWarningTitle, { color: '#1e40af' }]}>Auto-Sync Enabled</Text>
-                <Text style={[styles.offlineWarningText, { color: '#1e40af' }]}>
+                <Text style={{ fontWeight: 'bold', color: '#1e40af', fontSize: 13 }}>Auto-Sync Enabled</Text>
+                <Text style={{ color: '#1e40af', fontSize: 12, marginTop: 2 }}>
                   {offlineStore.pendingCount} item(s) will automatically sync when you reconnect to the internet.
                 </Text>
               </View>
@@ -431,79 +425,89 @@ const SettingsScreen = observer(({ navigation }) => {
           )}
 
           {offlineStore.isSyncing && (
-            <View style={styles.syncProgressWrap}>
+            <View style={styles.loadingRow}>
               <ActivityIndicator size="small" color="#1e5a8e" />
-              <Text style={styles.syncProgressText}>Syncing... {offlineStore.syncProgress}%</Text>
+              <Text style={styles.loadingText}>Syncing... {offlineStore.syncProgress}%</Text>
             </View>
           )}
 
-          <View style={styles.actionsRow}>
+          <View style={{ marginTop: 12 }}>
             <TouchableOpacity
-              style={[styles.primaryBtn, { flex: 1 }]}
+              style={styles.primaryBtn}
               onPress={() => offlineStore.startSync()}
               disabled={!offlineStore.isOnline || offlineStore.isSyncing || offlineStore.pendingCount === 0}
             >
               {offlineStore.isSyncing ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <>
                   <Ionicons name="sync" size={16} color="#fff" />
-                  <Text style={styles.primaryBtnText}>Sync Now</Text>
-                </View>
+                  <Text style={[styles.primaryBtnText, { marginLeft: 8 }]}>Sync Now</Text>
+                </>
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.outlineBtn}
-              onPress={() => offlineStore.retryFailed()}
-              disabled={offlineStore.failedCount === 0 || offlineStore.isSyncing}
-            >
-              <Text style={styles.outlineBtnText}>Retry Failed</Text>
-            </TouchableOpacity>
+            {offlineStore.failedCount > 0 && !offlineStore.isSyncing && (
+              <TouchableOpacity
+                style={[styles.primaryBtn, { backgroundColor: '#f59e0b', marginTop: 8 }]}
+                onPress={() => offlineStore.retryFailed()}
+              >
+                <Text style={styles.primaryBtnText}>Retry Failed</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {(offlineStore.pendingCount > 0 || offlineStore.failedCount > 0) && (
-            <TouchableOpacity
-              style={[styles.outlineBtnFull, { borderColor: '#ef4444', marginTop: 8 }]}
-              onPress={() => {
-                Alert.alert(
-                  'Clear Queue',
-                  'Are you sure you want to clear all pending and failed items? This action cannot be undone.',
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                      text: 'Clear',
-                      style: 'destructive',
-                      onPress: () => offlineStore.clearAllQueue()
-                    }
-                  ]
-                );
-              }}
-            >
-              <Text style={[styles.outlineBtnText, { color: '#ef4444' }]}>Clear Queue</Text>
-            </TouchableOpacity>
+            <View style={{ marginTop: 8 }}>
+              <TouchableOpacity
+                style={styles.clearBtn}
+                onPress={() => {
+                  Alert.alert(
+                    'Clear Queue',
+                    'Are you sure you want to clear all pending and failed items? This action cannot be undone.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Clear',
+                        style: 'destructive',
+                        onPress: () => offlineStore.clearAllQueue()
+                      }
+                    ]
+                  );
+                }}
+              >
+                <Ionicons name="trash-outline" size={18} color="#ef4444" style={{ marginRight: 8 }} />
+                <Text style={styles.clearBtnText}>Clear Queue</Text>
+              </TouchableOpacity>
+            </View>
           )}
         </View>
 
         {/* General Settings */}
-        <View style={styles.cardLight}>
-          <Text style={styles.cardTitle}>General Settings</Text>
-          <View style={styles.metaRow}>
-            <Text style={styles.metaLabel}>App Version</Text>
-            <Text style={styles.metaValue}>{appVersion}</Text>
+        <View style={styles.sheet}>
+          <View style={styles.cardHeaderRow}>
+            <View style={styles.detailIcon}><Ionicons name="settings-outline" size={18} color="#1f3a8a" /></View>
+            <Text style={styles.sheetTitle}>General Settings</Text>
           </View>
-          <View style={styles.metaRow}>
-            <Text style={styles.metaLabel}>Build Number</Text>
-            <Text style={styles.metaValue}>{buildNumber}</Text>
-          </View>
-          <View style={styles.metaRow}>
-            <Text style={styles.metaLabel}>Last Updated</Text>
-            <Text style={styles.metaValue}>{new Date().toLocaleDateString()}</Text>
+
+          <View style={{ marginTop: 8 }}>
+            <View style={styles.itemRow}>
+              <Text style={styles.itemLabel}>App Version</Text>
+              <Text style={styles.itemValue}>{appVersion}</Text>
+            </View>
+            <View style={styles.itemRow}>
+              <Text style={styles.itemLabel}>Build Number</Text>
+              <Text style={styles.itemValue}>{buildNumber}</Text>
+            </View>
+            <View style={styles.itemRow}>
+              <Text style={styles.itemLabel}>Last Updated</Text>
+              <Text style={styles.itemValue}>{new Date().toLocaleDateString()}</Text>
+            </View>
           </View>
 
           {/* Check for Updates Button */}
           <TouchableOpacity
-            style={[styles.outlineBtn, { marginTop: 15, borderColor: '#3b82f6', opacity: checkingUpdate ? 0.6 : 1 }]}
+            style={[styles.primaryBtn, { backgroundColor: '#fff', borderWidth: 1, borderColor: '#3b82f6', marginTop: 12 }]}
             disabled={checkingUpdate}
             onPress={async () => {
               setCheckingUpdate(true);
@@ -533,24 +537,27 @@ const SettingsScreen = observer(({ navigation }) => {
             {checkingUpdate ? (
               <>
                 <ActivityIndicator size="small" color="#3b82f6" style={{ marginRight: 6 }} />
-                <Text style={[styles.outlineBtnText, { color: '#3b82f6' }]}>Checking...</Text>
+                <Text style={[styles.primaryBtnText, { color: '#3b82f6' }]}>Checking...</Text>
               </>
             ) : (
               <>
                 <Ionicons name="refresh-outline" size={18} color="#3b82f6" style={{ marginRight: 6 }} />
-                <Text style={[styles.outlineBtnText, { color: '#3b82f6' }]}>Check for Updates</Text>
+                <Text style={[styles.primaryBtnText, { color: '#3b82f6' }]}>Check for Updates</Text>
               </>
             )}
           </TouchableOpacity>
         </View>
 
         {/* Logout Button */}
-        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={20} color="#ef4444" style={{ marginRight: 8 }} />
-          <Text style={styles.logoutBtnText}>Logout</Text>
-        </TouchableOpacity>
-
-        <View style={{ height: 80 }} />
+        <View style={{ marginHorizontal: 16, marginTop: 24 }}>
+          <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+            <Ionicons name="log-out-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.logoutBtnText}>Logout</Text>
+          </TouchableOpacity>
+          <Text style={{ textAlign: 'center', color: '#9ca3af', marginTop: 12, fontSize: 12 }}>
+            Version {appVersion}
+          </Text>
+        </View>
       </ScrollView>
 
       {/* Logout Modal */}
@@ -560,50 +567,38 @@ const SettingsScreen = observer(({ navigation }) => {
         visible={store.logoutModalVisible}
         onRequestClose={cancelLogout}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 24, width: '85%', alignItems: 'center' }}>
             {/* Icon */}
-            <View style={styles.modalIconContainer}>
-              <LinearGradient
-                colors={['#ef4444', '#dc2626']}
-                style={styles.modalIconGradient}
-              >
-                <Ionicons name="log-out-outline" size={40} color="#fff" />
-              </LinearGradient>
+            <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#fee2e2', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+              <Ionicons name="log-out-outline" size={32} color="#ef4444" />
             </View>
 
             {/* Title */}
-            <Text style={styles.modalTitle}>Logout</Text>
+            <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#1f2937', marginBottom: 8 }}>Logout</Text>
 
             {/* Message */}
-            <Text style={styles.modalMessage}>
+            <Text style={{ fontSize: 15, color: '#6b7280', textAlign: 'center', marginBottom: 24 }}>
               Are you sure you want to logout?{'\n'}
               You will need to login again to access the app.
             </Text>
 
             {/* Buttons */}
-            <View style={styles.modalButtons}>
+            <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
               <TouchableOpacity
-                style={styles.modalCancelBtn}
+                style={{ flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: '#f3f4f6', alignItems: 'center' }}
                 onPress={cancelLogout}
                 activeOpacity={0.7}
               >
-                <Text style={styles.modalCancelText}>Cancel</Text>
+                <Text style={{ color: '#4b5563', fontWeight: '600' }}>Cancel</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.modalConfirmBtn}
+                style={{ flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: '#ef4444', alignItems: 'center' }}
                 onPress={confirmLogout}
                 activeOpacity={0.7}
               >
-                <LinearGradient
-                  colors={['#ef4444', '#dc2626']}
-                  style={styles.modalConfirmGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                >
-                  <Text style={styles.modalConfirmText}>Yes, Logout</Text>
-                </LinearGradient>
+                <Text style={{ color: '#fff', fontWeight: '600' }}>Yes, Logout</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -617,8 +612,8 @@ const SettingsScreen = observer(({ navigation }) => {
         visible={isGisDownloading}
         onRequestClose={() => { }}
       >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContainer, { height: 'auto', paddingVertical: 24 }]}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 24, width: '85%', alignItems: 'center' }}>
             <View style={{ alignItems: 'center', paddingHorizontal: 20 }}>
               <ActivityIndicator size="large" color="#1e5a8e" style={{ marginBottom: 16 }} />
               <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1e5a8e', marginBottom: 8 }}>
