@@ -31,6 +31,7 @@
     "expo-sqlite": "~16.0.10",
     "expo-task-manager": "~14.0.8",
     "expo-updates": "~29.0.13",
+    "fflate": "^0.8.2",
     "jszip": "^3.10.1",
     "mobx": "^6.13.5",
     "mobx-react-lite": "^4.1.1",

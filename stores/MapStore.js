@@ -1,6 +1,6 @@
 import { makeAutoObservable, runInAction } from 'mobx';
 import * as FileSystem from 'expo-file-system/legacy';
-import JSZip from 'jszip';
+import { unzipSync } from 'fflate';
 
 class MapStore {
     downloadProgress = 0;
@@ -204,175 +204,119 @@ class MapStore {
     }
 
     async unzipMap(zipPath, extractPath, notificationCallback = null) {
-        this.setIsUnzipping(true);
-        this.setStatusMessage('Starting extraction...');
+        runInAction(() => {
+            this.setIsUnzipping(true);
+            this.setStatusMessage('Reading zip file...');
+        });
 
         try {
-            console.log('Starting extraction...');
+            console.log('Starting fflate extraction...');
             console.log('Zip file:', zipPath);
             console.log('Extract to:', extractPath);
 
-            // Create extract directory
             await FileSystem.makeDirectoryAsync(extractPath, { intermediates: true });
 
-            // Read file info first to check size
+            // Get file size
             const fileInfo = await FileSystem.getInfoAsync(zipPath);
-            console.log('Zip file size:', fileInfo.size, 'bytes');
+            const fileSize = fileInfo.size ?? 0;
+            console.log('Zip file size:', fileSize, 'bytes');
 
-            // Reduce chunk size to prevent memory issues
-            const chunkSize = 1024 * 1024 * 5; // 5MB chunks (reduced from 10MB)
-            let offset = 0;
-            const chunks = [];
+            // Read in ~10MB chunks to avoid OOM, decode directly into a single buffer
+            const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB raw bytes per chunk
+            const zipBytes = new Uint8Array(fileSize);
+            let written = 0;
 
-            let lastNotificationProgress = 0;
-
-            // Phase 1: Read file in chunks (0-100% of reading phase)
-            console.log('Phase 1: Reading zip file...');
-            while (offset < fileInfo.size) {
-                const readSize = Math.min(chunkSize, fileInfo.size - offset);
-
-                const base64Chunk = await FileSystem.readAsStringAsync(zipPath, {
+            const startRead = Date.now();
+            while (written < fileSize) {
+                const readLen = Math.min(CHUNK_SIZE, fileSize - written);
+                const b64Chunk = await FileSystem.readAsStringAsync(zipPath, {
                     encoding: FileSystem.EncodingType.Base64,
-                    position: offset,
-                    length: readSize
+                    position: written,
+                    length: readLen,
                 });
 
-                const binaryString = atob(base64Chunk);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
+                // Decode base64 chunk directly into the pre-allocated buffer
+                const raw = atob(b64Chunk);
+                for (let i = 0; i < raw.length; i++) {
+                    zipBytes[written + i] = raw.charCodeAt(i);
                 }
+                written += raw.length;
 
-                chunks.push(bytes);
-
-                offset += readSize;
-                const readProgress = Math.round((offset / fileInfo.size) * 100);
+                const pct = Math.round((written / fileSize) * 100);
 
                 runInAction(() => {
-                    this.setStatusMessage(`Reading zip file: ${readProgress}%`);
+                    this.setStatusMessage(`Reading zip: ${pct}%`);
                 });
-
-                // Send notification every 10% progress for reading
-                // if (notificationCallback && readProgress >= lastNotificationProgress + 10) {
-                //     lastNotificationProgress = readProgress;
-                //     await notificationCallback(
-                //         '📦 Reading Zip File',
-                //         `Progress: ${readProgress}%`
-                //     );
-                // }
-
-                const now = new Date();
-                const time = now.toLocaleTimeString();
-                console.log(`[${time}] Read progress: ${readProgress}% (${offset}/${fileInfo.size} bytes)`);
-
-                // Force garbage collection hint by nullifying old references
-                if (chunks.length > 20) {
-                    console.log('Memory management: Assembling chunks...');
-                    const tempBuffer = new Uint8Array(chunks.reduce((acc, chunk) => acc + chunk.length, 0));
-                    let tempOffset = 0;
-                    for (const chunk of chunks) {
-                        tempBuffer.set(chunk, tempOffset);
-                        tempOffset += chunk.length;
-                    }
-                    chunks.length = 0;
-                    chunks.push(tempBuffer);
-                }
+                console.log(`Read ${pct}% (${written}/${fileSize})`);
             }
+            console.log(`Zip read in ${Date.now() - startRead}ms`);
 
-            // Assemble all chunks into final buffer
-            console.log('Assembling final buffer...');
+            // Decompress with fflate (much faster than JSZip)
             runInAction(() => {
-                this.setStatusMessage('Assembling zip data...');
+                this.setStatusMessage('Decompressing...');
             });
 
-            const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-            const zipBuffer = new Uint8Array(totalLength);
-            let bufferOffset = 0;
-            for (const chunk of chunks) {
-                zipBuffer.set(chunk, bufferOffset);
-                bufferOffset += chunk.length;
-            }
-            chunks.length = 0; // Clear chunks array
+            const startDecompress = Date.now();
+            const extracted = unzipSync(zipBytes);
+            const filenames = Object.keys(extracted);
+            console.log(`Decompressed ${filenames.length} entries in ${Date.now() - startDecompress}ms`);
 
-            console.log('Loading zip with JSZip...');
-            runInAction(() => {
-                this.setStatusMessage('Processing zip file...');
-            });
-
-            if (notificationCallback) {
-                await notificationCallback(
-                    '📦 Processing Zip',
-                    'Loading zip structure...'
-                );
-            }
-
-            const zip = new JSZip();
-            const zipData = await zip.loadAsync(zipBuffer);
-
-            console.log('Extracting files...');
-
-            // Phase 2: Extract files (0-100% of extraction phase)
-            const files = Object.keys(zipData.files);
+            // Write files in large batches
+            const batchSize = 150;
             let processed = 0;
-            const batchSize = 50;
+            const createdDirs = new Set();
 
-            lastNotificationProgress = 0;
-
-            for (let i = 0; i < files.length; i += batchSize) {
-                const batch = files.slice(i, Math.min(i + batchSize, files.length));
+            for (let i = 0; i < filenames.length; i += batchSize) {
+                const batch = filenames.slice(i, Math.min(i + batchSize, filenames.length));
 
                 await Promise.all(
                     batch.map(async (filename) => {
-                        const file = zipData.files[filename];
+                        if (filename.endsWith('/')) return;
 
-                        if (!file.dir) {
-                            const content = await file.async('base64');
-                            const filePath = `${extractPath}${filename}`;
+                        const fileData = extracted[filename];
+                        if (!fileData || fileData.length === 0) return;
 
-                            const dirPath = filePath.substring(0, filePath.lastIndexOf('/'));
-                            if (dirPath) {
-                                await FileSystem.makeDirectoryAsync(dirPath, { intermediates: true });
-                            }
+                        const filePath = `${extractPath}${filename}`;
+                        const dirPath = filePath.substring(0, filePath.lastIndexOf('/'));
 
-                            await FileSystem.writeAsStringAsync(filePath, content, {
-                                encoding: FileSystem.EncodingType.Base64
-                            });
+                        if (dirPath && !createdDirs.has(dirPath)) {
+                            createdDirs.add(dirPath);
+                            await FileSystem.makeDirectoryAsync(dirPath, { intermediates: true });
                         }
+
+                        // Convert Uint8Array → base64 for writing
+                        let binary = '';
+                        const len = fileData.length;
+                        const chunkLen = 8192;
+                        for (let j = 0; j < len; j += chunkLen) {
+                            const slice = fileData.subarray(j, Math.min(j + chunkLen, len));
+                            binary += String.fromCharCode.apply(null, slice);
+                        }
+
+                        await FileSystem.writeAsStringAsync(filePath, btoa(binary), {
+                            encoding: FileSystem.EncodingType.Base64,
+                        });
                     })
                 );
 
                 processed += batch.length;
-                const extractProgress = Math.round((processed / files.length) * 100);
+                const pct = Math.round((processed / filenames.length) * 100);
 
                 runInAction(() => {
-                    this.setStatusMessage(`Extracting files: ${extractProgress}% (${processed}/${files.length} files)`);
+                    this.setStatusMessage(`Writing files: ${pct}% (${processed}/${filenames.length})`);
                 });
-
-                // Send notification every 10% progress for extraction
-                // if (notificationCallback && extractProgress >= lastNotificationProgress + 10) {
-                //     lastNotificationProgress = extractProgress;
-                //     await notificationCallback(
-                //         '📦 Extracting Files',
-                //         `Progress: ${extractProgress}%`
-                //     );
-                // }
-
-                const now = new Date();
-                const time = now.toLocaleTimeString();
-                console.log(`[${time}] Extraction progress: ${extractProgress}% (${processed}/${files.length} files)`);
             }
 
             console.log('Extraction complete');
-
             runInAction(() => {
                 this.setIsUnzipping(false);
                 this.setStatusMessage('Extraction complete');
             });
-
         } catch (error) {
             console.error('Unzip error:', error);
             runInAction(() => {
                 this.setIsUnzipping(false);
+                this.setError(error.message);
             });
             throw new Error(`Unzip failed: ${error.message}`);
         }
